@@ -132,8 +132,11 @@
     <div class="card">
       <h2>Stock in / Restock</h2>
       <label for="stockProduct">Product</label><select id="stockProduct"></select>
+      <label for="stockBarcode">Scan barcode to select product (optional)</label>
+      <div class="row"><input id="stockBarcode" placeholder="Scan or type barcode"><button class="secondary" id="stockScanButton" type="button">📷 Scan</button></div>
+      <div id="stockScannerBox" class="hidden"></div>
       <div class="row"><div><label for="stockQty">Quantity added</label><input id="stockQty" type="number" min="0.01" step="0.01" placeholder="0"></div><div><label for="stockCost">Updated cost per unit (optional)</label><input id="stockCost" type="number" min="0" step="0.01" placeholder="Leave blank to keep current"></div></div>
-      <div class="actions"><button class="primary" id="stockInButton">Add stock</button></div>
+      <div class="actions"><button class="primary" id="stockInButton">Add stock</button><button class="secondary hidden" id="stockStopScanButton" type="button">Stop scanner</button></div>
     </div>
   </section>
 
@@ -142,7 +145,11 @@
       <h2>Stock count</h2>
       <p class="muted">Enter the actual quantity on hand. Applying the count replaces the system quantity with the counted quantity.</p>
       <label for="countProduct">Product</label><select id="countProduct"></select>
+      <label for="countBarcode">Scan barcode to select product (optional)</label>
+      <div class="row"><input id="countBarcode" placeholder="Scan or type barcode"><button class="secondary" id="countScanButton" type="button">📷 Scan</button></div>
+      <div id="countScannerBox" class="hidden"></div>
       <div class="row"><div><label for="countQty">Actual quantity</label><input id="countQty" type="number" min="0" step="0.01" placeholder="0"></div><div><label>&nbsp;</label><button class="primary" id="saveCountButton" style="width:100%">Add to count list</button></div></div>
+      <button class="secondary hidden" id="countStopScanButton" type="button">Stop scanner</button>
       <div id="countDraftList" style="margin-top:12px"></div>
       <div class="actions"><button class="primary" id="applyCountButton">Apply stock count</button><button class="secondary" id="clearCountButton">Clear count list</button></div>
     </div>
@@ -270,6 +277,28 @@
     const key=String(code||"").trim().toLowerCase();
     return products.find(p=>String(p.barcode||"").trim().toLowerCase()===key || String(p.id)===key);
   }
+  // Short, high-pitched POS scan confirmation beep.
+  function playPunchSound() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = ctx.currentTime;
+      osc.type = "square";
+      osc.frequency.setValueAtTime(2350, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.008);
+      gain.gain.setValueAtTime(0.12, start + 0.065);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.095);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.10);
+      osc.onended = () => ctx.close();
+    } catch (e) {}
+  }
   function addProductToCart(p) {
     if(!p) return message("Product not found. Check the barcode or add the product first.","error");
     if(num(p.stock)<=0) return message("No stock available for "+p.name+".","error");
@@ -278,7 +307,7 @@
       if(line.qty+1>num(p.stock)) return message("Not enough stock for "+p.name+".","error");
       line.qty++;
     } else cart.push({productId:p.id,name:p.name,barcode:p.barcode,price:num(p.price),cost:num(p.cost),qty:1});
-    $("scanCode").value=""; renderCart();
+    playPunchSound(); $("scanCode").value=""; renderCart();
   }
   function renderQuickItems() {
     const search=$("productSearch").value.trim().toLowerCase();
@@ -409,6 +438,20 @@
       countDrafts=[];localWrite();await syncAll();renderCountDrafts();message("Stock count applied to shared inventory.","success");
     }catch(e){message("Some counts may not have applied. Refresh and check stock: "+e.message,"error");}
   }
+  async function deleteSale(saleId) {
+    const sale=sales.find(x=>x.id===saleId); if(!sale)return;
+    if(!confirm("Delete this test sale? Its sold quantities will be added back to inventory. This cannot be undone."))return;
+    try {
+      for(const item of (sale.items||[])) {
+        const pid=item.product_id||item.productId;
+        const p=products.find(x=>x.id===pid);
+        if(p) await updateProduct(p,{stock:num(p.stock)+num(item.qty)});
+      }
+      const {error}=await db.from("sales").delete().eq("id",saleId);
+      if(error)throw error;
+      await syncAll();message("Sale deleted and stock restored.","success");
+    } catch(e) { message("Could not fully delete sale. Refresh and check inventory and sales: "+e.message,"error"); }
+  }
   function renderReports() {
     $("metricProducts").textContent=products.length;
     $("metricStock").textContent=products.reduce((s,p)=>s+num(p.stock),0).toLocaleString("en-PH");
@@ -420,7 +463,8 @@
     const units=monthly.reduce((s,x)=>s+(Array.isArray(x.items)?x.items.reduce((a,i)=>a+num(i.qty),0):0),0);
     $("monthSummary").innerHTML=`<div class="grid"><div class="metric"><span>Number of sales</span><strong>${monthly.length}</strong></div><div class="metric"><span>Items sold</span><strong>${units}</strong></div><div class="metric"><span>Total cash sales</span><strong>${money(salesTotal)}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div></div><p class="muted" style="margin-top:10px">Gross profit is an estimate based on recorded product cost at the time of sale. It does not subtract other expenses, household use, or missing stock.</p>`;
     const recent=[...sales].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,100);
-    $("salesTable").innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Items</th><th>Total</th><th>Cash</th><th>Change</th><th>Gross profit</th></tr></thead><tbody>${recent.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}</td><td>${Array.isArray(s.items)?s.items.reduce((a,i)=>a+num(i.qty),0):0}</td><td>${money(s.total)}</td><td>${money(s.cash)}</td><td>${money(s.change)}</td><td>${money(s.grossProfit)}</td></tr>`).join("")}</tbody></table>`:'<p class="muted">No sales recorded yet.</p>';
+    $("salesTable").innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Items</th><th>Total</th><th>Cash</th><th>Change</th><th>Gross profit</th><th>Action</th></tr></thead><tbody>${recent.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}</td><td>${Array.isArray(s.items)?s.items.reduce((a,i)=>a+num(i.qty),0):0}</td><td>${money(s.total)}</td><td>${money(s.cash)}</td><td>${money(s.change)}</td><td>${money(s.grossProfit)}</td><td><button class="danger small" data-delete-sale="${escapeHtml(s.id)}">Delete</button></td></tr>`).join("")}</tbody></table>`:'<p class="muted">No sales recorded yet.</p>';
+    $("salesTable").querySelectorAll("[data-delete-sale]").forEach(b=>b.addEventListener("click",()=>deleteSale(b.dataset.deleteSale)));
   }
   function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderReports();}
   function switchPage(id){
@@ -464,6 +508,39 @@
     user=null;products=[];sales=[];cart=[];countDrafts=[];
     $("appMain").classList.add("hidden");$("loginScreen").classList.remove("hidden");$("password").value="";
   }
+
+  async function stopSectionScanner(boxId, startId, stopId, scannerObj) {
+    if(scannerObj.current){try{await scannerObj.current.stop();scannerObj.current.clear();}catch{}scannerObj.current=null;}
+    $(boxId).classList.add("hidden");$(startId).classList.remove("hidden");$(stopId).classList.add("hidden");
+  }
+  function setupProductScanner(startId,stopId,boxId,barcodeId,selectId,scannerObj) {
+    $(startId).addEventListener("click",async()=>{
+      if(!window.Html5Qrcode)return message("Scanner library did not load. Type the barcode instead.","error");
+      $(boxId).classList.remove("hidden");$(startId).classList.add("hidden");$(stopId).classList.remove("hidden");
+      try {
+        scannerObj.current=new Html5Qrcode(boxId);
+        await scannerObj.current.start({facingMode:"environment"},{fps:10,qrbox:{width:230,height:160}},async decoded=>{
+          $(barcodeId).value=decoded;
+          const p=findProduct(decoded);
+          if(!p){playPunchSound();message("Barcode scanned, but no matching product was found. Check the product barcode.","error");return;}
+          $(selectId).value=p.id;playPunchSound();message("Selected: "+p.name,"success");
+          await stopSectionScanner(boxId,startId,stopId,scannerObj);
+        });
+      } catch(e) {
+        await stopSectionScanner(boxId,startId,stopId,scannerObj);
+        message("Camera could not start. Allow camera permission or type the barcode manually.","error");
+      }
+    });
+    $(stopId).addEventListener("click",()=>stopSectionScanner(boxId,startId,stopId,scannerObj));
+    $(barcodeId).addEventListener("keydown",e=>{
+      if(e.key!=="Enter")return;e.preventDefault();const p=findProduct(e.target.value);
+      if(!p)return message("No product matches that barcode.","error");
+      $(selectId).value=p.id;playPunchSound();message("Selected: "+p.name,"success");
+    });
+  }
+  const stockScanner={current:null}, countScanner={current:null};
+  setupProductScanner("stockScanButton","stockStopScanButton","stockScannerBox","stockBarcode","stockProduct",stockScanner);
+  setupProductScanner("countScanButton","countStopScanButton","countScannerBox","countBarcode","countProduct",countScanner);
 
   $("loginForm").addEventListener("submit",async e=>{
     e.preventDefault();busyButton("loginButton",true);
