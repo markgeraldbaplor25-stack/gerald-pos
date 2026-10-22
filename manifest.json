@@ -1,0 +1,12 @@
+{
+"id": "./",
+"name": "Gerald POS",
+"short_name": "Gerald POS",
+"description": "An offline-capable point of sale and inventory management app for a sari-sari store.",
+"start_url": "./",
+"scope": "./",
+"display": "standalone",
+"orientation": "portrait",
+"background_color": "#ffffff",
+"theme_color": "#166534"
+}
