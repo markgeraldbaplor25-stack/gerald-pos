@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gerald POS</title>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f1f5f9;color:#172033}
+header{background:#123b2b;color:white;padding:20px 16px}
+header h1{margin:0;font-size:24px} header p{margin:6px 0 0;font-size:13px;color:#d1fae5}
+nav{display:flex;gap:8px;overflow-x:auto;background:white;padding:10px;position:sticky;top:0;z-index:5;border-bottom:1px solid #ddd}
+nav button{flex-shrink:0;border:0;padding:11px 14px;border-radius:8px;background:#e5e7eb;font-weight:bold}
+nav button.active{background:#166534;color:white}
+main{padding:14px;max-width:760px;margin:auto}.page{display:none}.page.active{display:block}
+.card{background:white;padding:16px;margin-bottom:14px;border-radius:12px;box-shadow:0 2px 8px #0000000b}
+h2{margin-top:0;font-size:19px} label{display:block;font-size:13px;font-weight:bold;margin:12px 0 5px}
+input{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px;background:white}
+button{cursor:pointer}.btn{width:100%;padding:12px;margin-top:10px;border:0;border-radius:8px;background:#166534;color:white;font-size:15px;font-weight:bold}
+.btn-secondary{background:#334155}.btn-danger{background:#b91c1c}.btn-small{border:0;border-radius:6px;padding:7px 10px;background:#e2e8f0;color:#172033}
+.btn-row{display:flex;gap:8px}.btn-row .btn{flex:1}
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}.stat{background:white;padding:14px;border-radius:10px}
+.stat small{color:#64748b}.stat strong{display:block;font-size:21px;margin-top:6px;overflow-wrap:anywhere}
+#reader{width:100%;overflow:hidden;border-radius:8px}.message{padding:10px;border-radius:8px;background:#ecfdf5;margin-top:10px;font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:9px 5px;border-bottom:1px solid #e2e8f0;overflow-wrap:anywhere}th{background:#f8fafc}
+.table-wrap{overflow-x:auto}.total{font-size:24px;font-weight:bold;color:#166534;margin-top:12px}
+.muted{font-size:13px;color:#64748b;line-height:1.5}.empty{padding:15px 0;text-align:center;color:#64748b}
+footer{text-align:center;font-size:12px;color:#64748b;padding:20px}
+.modal{display:none;position:fixed;inset:0;background:#0f172acc;z-index:20;padding:16px;overflow:auto}
+.modal-box{max-width:560px;margin:5vh auto;background:white;border-radius:14px;padding:16px}
+.quick-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.quick-item{border:1px solid #bbf7d0;background:#f0fdf4;color:#14532d;border-radius:10px;padding:12px 8px;text-align:left;min-height:70px}.quick-item strong{display:block;font-size:14px;overflow-wrap:anywhere}.quick-item span{display:block;margin-top:5px;font-weight:bold}.badge{display:inline-block;padding:4px 8px;border-radius:99px;background:#dcfce7;color:#166534;font-size:12px;font-weight:bold}
+@media(max-width:420px){.btn-row{flex-direction:column}.stat strong{font-size:18px}}
+</style>
+</head>
+<body>
+<header><h1>Gerald POS</h1><p>Cash Sales • Barcode Scanner • Inventory</p></header>
+<nav>
+<button class="active" onclick="showPage('sales',this)">Sales</button>
+<button onclick="showPage('products',this)">Products</button>
+<button onclick="showPage('stock',this)">Stock In</button>
+<button onclick="showPage('count',this)">Stock Count</button>
+<button onclick="showPage('reports',this)">Reports</button>
+</nav>
+<main>
+<section id="sales" class="page active">
+<div class="summary">
+<div class="stat"><small>Today's Sales</small><strong id="todaySales">₱0.00</strong></div>
+<div class="stat"><small>Products</small><strong id="productCount">0</strong></div>
+</div>
+<div class="card">
+<h2>📷 Scan for Sales</h2>
+<p class="muted">Start the camera scanner, then point it at a product barcode. A beep confirms a recognized product.</p>
+<button class="btn" onclick="openScanner('sales')">Start Camera Scanner</button>
+<div id="salesScanMessage" class="message">Scanner is stopped.</div>
+</div>
+<div class="card">
+<h2>🧃 Walang Barcode</h2>
+<p class="muted">Para sa tingi na yosi, softdrinks, kape at iba pang panindang walang barcode. Pindutin ang item para idagdag sa sale.</p>
+<input id="quickItemSearch" placeholder="🔎 Hanapin ang item..." oninput="renderQuickItems()">
+<div id="quickItemList" class="quick-grid"></div>
+<button class="btn btn-secondary" onclick="showPage('products',document.querySelectorAll('nav button')[1]);document.getElementById('pName').focus()">➕ Add New Item / Walang Barcode</button>
+</div>
+<div class="card">
+<h2>⌨️ Enter Barcode Manually</h2>
+<label for="manualBarcode">Barcode Number</label><input id="manualBarcode" placeholder="Enter barcode" autocomplete="off">
+<button class="btn" onclick="manualScan()">Find Product</button>
+</div>
+<div class="card">
+<h2>🛒 Current Sale</h2><div id="cartList"></div>
+<div class="total">Total: <span id="cartTotal">₱0.00</span></div>
+<label for="cashReceived">Cash Received (₱)</label><input id="cashReceived" type="number" min="0" step="0.01" placeholder="Enter amount received">
+<p>Change: <strong id="changeAmount">₱0.00</strong></p>
+<button class="btn" onclick="checkout()">Complete Cash Sale</button>
+<button class="btn btn-danger" onclick="clearCart()">Clear Current Sale</button>
+</div>
+</section>
+
+<section id="products" class="page">
+<div class="card">
+<h2>➕ Add New Product</h2>
+<label for="pBarcode">Barcode Number (optional)</label><input id="pBarcode" placeholder="Leave blank if no barcode">
+<button class="btn btn-secondary" onclick="openScanner('product')">📷 Scan Barcode into Product Form</button>
+<label for="pName">Product Name</label><input id="pName" placeholder="Example: Bottled Water">
+<label for="pCost">Cost per Piece (₱)</label><input id="pCost" type="number" min="0" step="0.01">
+<label for="pPrice">Selling Price (₱)</label><input id="pPrice" type="number" min="0" step="0.01">
+<label for="pStock">Beginning Stock (pieces)</label><input id="pStock" type="number" min="0" step="1" value="0">
+<button class="btn" onclick="addProduct()">Save New Product</button>
+<p class="muted">Kung walang barcode, iwanang blanko ang barcode. Automatic na gagawa ang POS ng internal item code. Cost at selling price ay per piece.</p>
+</div>
+<div class="card"><h2>📦 Product Inventory</h2><input id="productSearch" placeholder="Search product or barcode" oninput="renderProducts()"><div id="productList" class="table-wrap"></div></div>
+</section>
+
+<section id="stock" class="page">
+<div class="card">
+<h2>📥 Stock In</h2>
+<label for="stockBarcode">Product Barcode</label><input id="stockBarcode" placeholder="Scan or type barcode">
+<button class="btn btn-secondary" onclick="openScanner('stock')">📷 Scan Barcode for Stock In</button>
+<label for="stockQty">Quantity Received</label><input id="stockQty" type="number" min="1" step="1" value="1">
+<label for="stockCost">New Cost per Piece (₱)</label><input id="stockCost" type="number" min="0" step="0.01" placeholder="Leave blank to keep current cost">
+<button class="btn" onclick="stockIn()">Add Stock</button><div id="stockMessage"></div>
+</div>
+</section>
+
+<section id="count" class="page">
+<div class="card">
+<h2>📋 Stock Count</h2>
+<p class="muted">I-scan ang bawat pirasong aktuwal na natitira. Bawat matagumpay na scan ng parehong produkto ay magdadagdag ng 1 sa bilang. Maaari ring ilagay nang mano-mano ang aktuwal na quantity. Hindi babaguhin ang stock hanggang pindutin mo ang Apply Count.</p>
+<label for="countBarcode">Product Barcode</label><input id="countBarcode" placeholder="Scan or type barcode">
+<div class="btn-row"><button class="btn btn-secondary" onclick="openScanner('count')">📷 Scan to Count</button><button class="btn" onclick="selectCountProduct()">Find Product</button></div>
+<div id="countProductInfo" class="message">Pumili o mag-scan ng produkto para simulan ang bilang.</div>
+<label for="countQty">Actual Quantity Counted</label><input id="countQty" type="number" min="0" step="1" value="0">
+<button class="btn btn-secondary" onclick="saveCountDraft()">Save Count in List</button>
+<div id="countList" class="table-wrap"></div>
+<button class="btn" onclick="applyCounts()">Apply Counts to Inventory</button>
+<button class="btn btn-danger" onclick="clearCountDrafts()">Clear Count List</button>
+</div>
+</section>
+
+<section id="reports" class="page">
+<div class="summary">
+<div class="stat"><small>Today's Sales</small><strong id="reportSales">₱0.00</strong></div>
+<div class="stat"><small>Today's Transactions</small><strong id="transactionCount">0</strong></div>
+<div class="stat"><small>Estimated Gross Profit</small><strong id="grossProfit">₱0.00</strong></div>
+<div class="stat"><small>Inventory Cost Value</small><strong id="inventoryValue">₱0.00</strong></div>
+</div>
+<div class="card"><h2>🧾 Sales History</h2><div id="salesHistory" class="table-wrap"></div><p class="muted">Gross profit is an estimate based on recorded item costs. It excludes rent, electricity, damaged goods, and other expenses.</p></div>
+<div class="card"><h2>📅 Month-End Summary</h2><label for="reportMonth">Select Month</label><input id="reportMonth" type="month"><button class="btn" onclick="monthEndReport()">Generate Monthly Summary</button><div id="monthResult"></div></div>
+<div class="card"><h2>💾 Data Backup</h2><p class="muted">Export a backup regularly. Browser data can be lost if storage is cleared or app data is deleted.</p><button class="btn" onclick="exportBackup()">Export Backup</button><label for="backupFile">Restore Backup File</label><input id="backupFile" type="file" accept=".json"><button class="btn btn-secondary" onclick="importBackup()">Restore Backup</button></div>
+</section>
+</main>
+<footer>Gerald POS • Local device storage</footer>
+
+<div id="scannerModal" class="modal">
+<div class="modal-box">
+<h2>📷 Barcode Scanner</h2><p id="scannerHelp" class="muted">Point the camera at the barcode.</p>
+<div id="reader"></div><div id="scannerMessage" class="message">Preparing camera…</div>
+<button class="btn btn-danger" onclick="closeScanner()">Stop Scanner</button>
+</div>
+</div>
+
+<script>
+const PRODUCTS_KEY = "geraldpos_new_products_v1";
+const SALES_KEY = "geraldpos_new_sales_v1";
+const COUNT_KEY = "geraldpos_new_count_drafts_v1";
+
+let products = loadData(PRODUCTS_KEY, []);
+let sales = loadData(SALES_KEY, []);
+let cart = [];
+let scanner = null;
+let scannerRunning = false;
+let scanTarget = "sales";
+let lastScanCode = "";
+let lastScanTime = 0;
+let scanningRequest = false;
+let countDrafts = loadData(COUNT_KEY, []);
+let selectedCountBarcode = "";
+
+function loadData(key, fallback) {
+    try { const data = localStorage.getItem(key); return data ? JSON.parse(data) : fallback; }
+    catch (error) { return fallback; }
+}
+function saveData() {
+    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+    localStorage.setItem(SALES_KEY, JSON.stringify(sales));
+    localStorage.setItem(COUNT_KEY, JSON.stringify(countDrafts));
+}
+function money(value) {
+    return "₱" + Number(value || 0).toLocaleString("en-PH", {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function todayString() {
+    const d = new Date();
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function beep(success=true) {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.connect(gain); gain.connect(ctx.destination);
+        oscillator.type = "sine";
+        oscillator.frequency.value = success ? 880 : 220;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (success ? 0.16 : 0.28));
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + (success ? 0.18 : 0.3));
+        oscillator.onended = () => ctx.close();
+    } catch (e) {}
+}
+function showPage(id, button) {
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    button.classList.add("active");
+    if (scannerRunning) closeScanner();
+    renderAll();
+}
+function findProduct(barcode) { return products.find(p => String(p.barcode) === String(barcode).trim()); }
+function addProduct() {
+    const barcode=document.getElementById("pBarcode").value.trim(), name=document.getElementById("pName").value.trim();
+    const ct=document.getElementById("pCost").value, pt=document.getElementById("pPrice").value, st=document.getElementById("pStock").value;
+    const cost=Number(ct), price=Number(pt), stock=Number(st);
+    if(!name||ct===""||pt===""||st===""){alert("Please enter product name, cost, selling price, and beginning stock.");return;}
+    if(!Number.isFinite(cost)||cost<0||!Number.isFinite(price)||price<0||!Number.isInteger(stock)||stock<0){alert("Enter valid cost, price, and whole-number stock.");return;}
+    if(barcode && products.some(p=>String(p.barcode)===barcode)){alert("This barcode already exists. Use Stock In to add inventory.");return;}
+    const itemCode=barcode || ("NOBC-"+Date.now());
+    products.push({id:Date.now(),barcode:itemCode,name,cost,price,stock,noBarcode:!barcode});
+    saveData();
+    ["pBarcode","pName","pCost","pPrice"].forEach(id=>document.getElementById(id).value="");
+    document.getElementById("pStock").value="0";
+    renderAll(); beep(true); alert("Product saved successfully!");
+}
+function addQuickItem(barcode) { return addToCart(barcode); }
+function renderQuickItems(){
+    const search=(document.getElementById("quickItemSearch")?.value||"").trim().toLowerCase();
+    const list=products.filter(p=>(p.noBarcode || String(p.barcode||"").startsWith("NOBC-")) && (String(p.name).toLowerCase().includes(search) || String(p.barcode).toLowerCase().includes(search)));
+    const el=document.getElementById("quickItemList");
+    if(!el) return;
+    el.innerHTML=list.length?list.map(p=>`<button class="quick-item" onclick="addQuickItem('${String(p.barcode).replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')"><strong>${escapeHTML(p.name)}</strong><span>${money(p.price)} • Stock: ${p.stock}</span></button>`).join(""):'<div class="empty">Wala pang naka-save na item na walang barcode. Idagdag muna sa Products.</div>';
+}
+function addToCart(barcode) {
+    const product=findProduct(barcode);
+    if(!product){beep(false);alert("Product not found. Add it in Products first.");return false;}
+    const existing=cart.find(i=>i.barcode===product.barcode), qty=existing?existing.qty:0;
+    if(qty+1>product.stock){beep(false);alert("Not enough stock for "+product.name+".");return false;}
+    if(existing) existing.qty++; else cart.push({barcode:product.barcode,name:product.name,price:Number(product.price),cost:Number(product.cost),qty:1});
+    beep(true); renderCart(); return true;
+}
+function manualScan() {
+    const b=document.getElementById("manualBarcode").value.trim();
+    if(!b){alert("Enter a barcode first.");return;}
+    if(addToCart(b)) document.getElementById("manualBarcode").value="";
+    document.getElementById("manualBarcode").focus();
+}
+document.getElementById("manualBarcode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();manualScan();}});
+async function openScanner(target) {
+    scanTarget=target;
+    if(typeof Html5Qrcode==="undefined"){alert("Scanner library did not load. Check your internet connection.");return;}
+    document.getElementById("scannerModal").style.display="block";
+    document.getElementById("scannerMessage").textContent="Opening camera…";
+    document.getElementById("scannerHelp").textContent =
+        target==="sales" ? "Scan products to add them to the current sale." :
+        target==="product" ? "Scan the product barcode to fill the Products form." :
+        target==="stock" ? "Scan the barcode for Stock In." : "Each scan adds one item to the actual count.";
+    try {
+        scanner = new Html5Qrcode("reader");
+        await scanner.start({facingMode:"environment"},{fps:10,qrbox:(w,h)=>{const width=Math.floor(Math.min(w,h)*0.8);return {width,height:Math.floor(width*0.48)}}},
+            decoded => handleScannedCode(decoded), ()=>{});
+        scannerRunning=true;
+        document.getElementById("scannerMessage").textContent="Camera active. Point it at a barcode.";
+    } catch(error) {
+        scanner=null; scannerRunning=false;
+        document.getElementById("scannerMessage").textContent="Camera could not start.";
+        alert("Camera could not start. Make sure camera permission is allowed and open this page in the browser where scanning worked.");
+    }
+}
+async function closeScanner() {
+    if(scanner) {
+        try { if(scannerRunning) await scanner.stop(); await scanner.clear(); } catch(e) {}
+    }
+    scanner=null; scannerRunning=false;
+    document.getElementById("scannerModal").style.display="none";
+}
+function handleScannedCode(rawCode) {
+    const code=String(rawCode).trim(), now=Date.now();
+    if(!code || scanningRequest) return;
+    if(code===lastScanCode && now-lastScanTime<1200) return;
+    lastScanCode=code; lastScanTime=now; scanningRequest=true;
+    try {
+        if(scanTarget==="sales") {
+            const ok=addToCart(code);
+            document.getElementById("scannerMessage").textContent=ok ? "Added to sale: "+code : "Product not found or stock unavailable: "+code;
+        } else if(scanTarget==="product") {
+            document.getElementById("pBarcode").value=code;
+            const existing=findProduct(code);
+            document.getElementById("scannerMessage").textContent=existing ? "Barcode belongs to "+existing.name+". Use Stock In for existing products." : "Barcode entered. Complete the product details.";
+            beep(!existing);
+            if(existing) beep(false);
+            else { closeScanner(); document.getElementById("pName").focus(); }
+        } else if(scanTarget==="stock") {
+            document.getElementById("stockBarcode").value=code;
+            const product=findProduct(code);
+            if(product) {
+                document.getElementById("scannerMessage").textContent="Found "+product.name+". Enter quantity in Stock In.";
+                beep(true); closeScanner(); document.getElementById("stockQty").focus();
+            } else {
+                document.getElementById("scannerMessage").textContent="Product not found. Add it in Products first.";
+                beep(false);
+            }
+        } else if(scanTarget==="count") {
+            const product=findProduct(code);
+            if(!product) {
+                document.getElementById("scannerMessage").textContent="Product not found: "+code;
+                beep(false);
+            } else {
+                const draft=countDrafts.find(d=>d.barcode===code);
+                if(draft) draft.countedQty+=1;
+                else countDrafts.push({barcode:code,countedQty:1});
+                selectedCountBarcode=code;
+                document.getElementById("countBarcode").value=code;
+                document.getElementById("countQty").value=(countDrafts.find(d=>d.barcode===code)).countedQty;
+                showCountInfo(product);
+                saveData(); renderCountList(); beep(true);
+                document.getElementById("scannerMessage").textContent=product.name+" counted: "+document.getElementById("countQty").value;
+            }
+        }
+    } finally {
+        setTimeout(()=>{scanningRequest=false;},650);
+    }
+}
+function cartTotal(){return cart.reduce((s,i)=>s+i.price*i.qty,0);}
+function renderCart(){
+    const el=document.getElementById("cartList");
+    if(!cart.length) el.innerHTML='<div class="empty">No items yet.</div>';
+    else el.innerHTML=`<table><thead><tr><th>Product</th><th>Qty</th><th>Price</th><th></th></tr></thead><tbody>${cart.map((i,n)=>`<tr><td>${escapeHTML(i.name)}</td><td><button class="btn-small" onclick="changeQty(${n},-1)">−</button> ${i.qty} <button class="btn-small" onclick="changeQty(${n},1)">+</button></td><td>${money(i.price*i.qty)}</td><td><button class="btn-small" onclick="removeCartItem(${n})">×</button></td></tr>`).join("")}</tbody></table>`;
+    document.getElementById("cartTotal").textContent=money(cartTotal()); updateChange();
+}
+function changeQty(index,amount){
+    const item=cart[index], product=findProduct(item.barcode), q=item.qty+amount;
+    if(q<=0) cart.splice(index,1);
+    else if(!product||q>product.stock){beep(false);alert("Quantity exceeds available stock.");return;}
+    else item.qty=q;
+    renderCart();
+}
+function removeCartItem(i){cart.splice(i,1);renderCart();}
+function clearCart(){if(cart.length&&confirm("Clear all items in the current sale?")){cart=[];document.getElementById("cashReceived").value="";renderCart();}}
+function updateChange(){
+    const text=document.getElementById("cashReceived").value, cash=Number(text), total=cartTotal();
+    document.getElementById("changeAmount").textContent=money(text===""?0:Math.max(0,cash-total));
+}
+document.getElementById("cashReceived").addEventListener("input",updateChange);
+function checkout(){
+    if(!cart.length){alert("There are no items in the sale.");return;}
+    const ct=document.getElementById("cashReceived").value;
+    if(ct===""){alert("Enter the cash received.");return;}
+    const cash=Number(ct), total=cartTotal();
+    if(!Number.isFinite(cash)||cash<total){alert("Cash received must be at least "+money(total)+".");return;}
+    for(const i of cart){const p=findProduct(i.barcode);if(!p||p.stock<i.qty){alert("Insufficient stock for "+i.name+".");return;}}
+    const items=cart.map(i=>({...i}));
+    items.forEach(i=>findProduct(i.barcode).stock-=i.qty);
+    sales.push({id:Date.now(),date:new Date().toISOString(),day:todayString(),items,total,cash,change:cash-total,grossProfit:items.reduce((s,i)=>s+(i.price-i.cost)*i.qty,0)});
+    saveData(); cart=[];document.getElementById("cashReceived").value="";renderAll();
+    beep(true);alert("SALE COMPLETED!\n\nTotal: "+money(total)+"\nCash: "+money(cash)+"\nChange: "+money(cash-total));
+}
+function stockIn(){
+    const b=document.getElementById("stockBarcode").value.trim(), qt=document.getElementById("stockQty").value, ct=document.getElementById("stockCost").value;
+    const qty=Number(qt), p=findProduct(b);
+    if(!p){beep(false);alert("Product not found. Add it in Products first.");return;}
+    if(qt===""||!Number.isInteger(qty)||qty<1){alert("Enter a valid whole-number quantity.");return;}
+    if(ct!==""){const c=Number(ct);if(!Number.isFinite(c)||c<0){alert("Enter a valid cost.");return;}p.cost=c;}
+    p.stock+=qty;saveData();renderAll();
+    document.getElementById("stockBarcode").value="";document.getElementById("stockQty").value="1";document.getElementById("stockCost").value="";
+    document.getElementById("stockMessage").innerHTML='<div class="message">Stock added for '+escapeHTML(p.name)+'. New stock: '+p.stock+'</div>';beep(true);
+}
+function renderProducts(){
+    const search=document.getElementById("productSearch").value.trim().toLowerCase();
+    const list=products.filter(p=>String(p.name).toLowerCase().includes(search)||String(p.barcode).toLowerCase().includes(search));
+    document.getElementById("productList").innerHTML=list.length?`<table><thead><tr><th>Product</th><th>Stock</th><th>Price</th></tr></thead><tbody>${list.map(p=>`<tr><td>${escapeHTML(p.name)}<br><small>${p.noBarcode || String(p.barcode).startsWith("NOBC-") ? "WALANG BARCODE • " : "CODE: "}${escapeHTML(p.barcode)}</small></td><td>${p.stock}</td><td>${money(p.price)}</td></tr>`).join("")}</tbody></table>`:'<div class="empty">No products found.</div>';
+}
+function showCountInfo(p){
+    const draft=countDrafts.find(d=>d.barcode===p.barcode);
+    document.getElementById("countProductInfo").innerHTML='<strong>'+escapeHTML(p.name)+'</strong><br>POS stock: '+p.stock+'<br>Counted so far: '+(draft?draft.countedQty:0);
+}
+function selectCountProduct(){
+    const b=document.getElementById("countBarcode").value.trim(), p=findProduct(b);
+    if(!p){beep(false);alert("Product not found. Add it in Products first.");return;}
+    selectedCountBarcode=b;
+    const d=countDrafts.find(x=>x.barcode===b);
+    document.getElementById("countQty").value=d?d.countedQty:0;
+    showCountInfo(p);beep(true);
+}
+function saveCountDraft(){
+    const b=document.getElementById("countBarcode").value.trim(), qt=document.getElementById("countQty").value, p=findProduct(b), qty=Number(qt);
+    if(!p){alert("Scan or find a product first.");return;}
+    if(qt===""||!Number.isInteger(qty)||qty<0){alert("Enter a whole-number count of zero or more.");return;}
+    const existing=countDrafts.find(d=>d.barcode===b);
+    if(existing) existing.countedQty=qty; else countDrafts.push({barcode:b,countedQty:qty});
+    selectedCountBarcode=b;saveData();renderCountList();showCountInfo(p);beep(true);
+}
+function renderCountList(){
+    const el=document.getElementById("countList");
+    if(!countDrafts.length){el.innerHTML='<div class="empty">No counts saved yet.</div>';return;}
+    el.innerHTML='<h3>Count List</h3><table><thead><tr><th>Product</th><th>POS</th><th>Counted</th><th>Difference</th><th></th></tr></thead><tbody>'+countDrafts.map(d=>{
+        const p=findProduct(d.barcode); if(!p)return "";
+        const diff=d.countedQty-p.stock;
+        return `<tr><td>${escapeHTML(p.name)}<br><small>${p.noBarcode || String(p.barcode).startsWith("NOBC-") ? "WALANG BARCODE • " : "CODE: "}${escapeHTML(p.barcode)}</small></td><td>${p.stock}</td><td>${d.countedQty}</td><td>${diff>0?"+":""}${diff}</td><td><button class="btn-small" onclick="editCountDraft('${escapeHTML(d.barcode)}')">Edit</button></td></tr>`;
+    }).join("")+'</tbody></table>';
+}
+function editCountDraft(barcode){
+    const d=countDrafts.find(x=>x.barcode===barcode), p=findProduct(barcode);if(!d||!p)return;
+    selectedCountBarcode=barcode;document.getElementById("countBarcode").value=barcode;document.getElementById("countQty").value=d.countedQty;showCountInfo(p);
+}
+function applyCounts(){
+    if(!countDrafts.length){alert("No counts to apply.");return;}
+    const lines=countDrafts.map(d=>{const p=findProduct(d.barcode);return p?p.name+": "+p.stock+" → "+d.countedQty:null;}).filter(Boolean);
+    if(!confirm("This will replace the POS stock with the counted quantity for these products:\n\n"+lines.join("\n")+"\n\nContinue?"))return;
+    countDrafts.forEach(d=>{const p=findProduct(d.barcode);if(p)p.stock=d.countedQty;});
+    countDrafts=[];saveData();renderAll();beep(true);alert("Stock counts applied successfully.");
+}
+function clearCountDrafts(){if(countDrafts.length&&confirm("Clear the saved count list without changing inventory?")){countDrafts=[];saveData();renderCountList();document.getElementById("countProductInfo").textContent="Pumili o mag-scan ng produkto para simulan ang bilang.";}}
+function renderReports(){
+    const today=sales.filter(s=>s.day===todayString());
+    const total=today.reduce((s,x)=>s+Number(x.total||0),0), profit=today.reduce((s,x)=>s+Number(x.grossProfit||0),0);
+    document.getElementById("todaySales").textContent=money(total);document.getElementById("reportSales").textContent=money(total);
+    document.getElementById("productCount").textContent=products.length;document.getElementById("transactionCount").textContent=today.length;
+    document.getElementById("grossProfit").textContent=money(profit);
+    document.getElementById("inventoryValue").textContent=money(products.reduce((s,p)=>s+Number(p.stock||0)*Number(p.cost||0),0));
+    const history=[...sales].reverse();
+    document.getElementById("salesHistory").innerHTML=history.length?'<table><thead><tr><th>Date</th><th>Total</th><th>Gross Profit</th></tr></thead><tbody>'+history.slice(0,100).map(s=>'<tr><td>'+escapeHTML(s.day||"")+'</td><td>'+money(s.total)+'</td><td>'+money(s.grossProfit)+'</td></tr>').join("")+'</tbody></table>':'<div class="empty">No sales recorded yet.</div>';
+}
+function monthEndReport(){
+    const month=document.getElementById("reportMonth").value;if(!month){alert("Select a month first.");return;}
+    const list=sales.filter(s=>String(s.day||"").startsWith(month));
+    const total=list.reduce((s,x)=>s+Number(x.total||0),0), profit=list.reduce((s,x)=>s+Number(x.grossProfit||0),0);
+    const value=products.reduce((s,p)=>s+Number(p.stock||0)*Number(p.cost||0),0);
+    document.getElementById("monthResult").innerHTML='<div class="message"><p><strong>Month:</strong> '+escapeHTML(month)+'</p><p><strong>Transactions:</strong> '+list.length+'</p><p><strong>Total Sales:</strong> '+money(total)+'</p><p><strong>Estimated Gross Profit:</strong> '+money(profit)+'</p><p><strong>Current Inventory Cost Value:</strong> '+money(value)+'</p><p class="muted">Inventory value is the current value, not historical month-end value. Gross profit excludes other expenses.</p></div>';
+}
+function exportBackup(){
+    const data={app:"Gerald POS",version:2,products,sales,countDrafts};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob),a=document.createElement("a");
+    a.href=url;a.download="geraldpos-backup-"+todayString()+".json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function importBackup(){
+    const file=document.getElementById("backupFile").files[0];if(!file){alert("Choose a backup JSON file first.");return;}
+    if(!confirm("Restore backup? Current product and sales data will be replaced."))return;
+    const reader=new FileReader();
+    reader.onload=()=>{try{
+        const data=JSON.parse(reader.result);if(!Array.isArray(data.products)||!Array.isArray(data.sales))throw new Error("Invalid");
+        products=data.products;sales=data.sales;countDrafts=Array.isArray(data.countDrafts)?data.countDrafts:[];cart=[];saveData();renderAll();renderCountList();alert("Backup restored successfully.");
+    }catch(e){alert("Invalid backup file.");}};
+    reader.readAsText(file);
+}
+function renderAll(){renderCart();renderProducts();renderReports();renderCountList();renderQuickItems();}
+document.getElementById("reportMonth").value=todayString().slice(0,7);
+renderAll();
+</script>
+</body>
+</html>
