@@ -120,7 +120,9 @@
   <section id="productsPage" class="page hidden">
     <div class="card">
       <h2>Add product</h2>
-      <div class="row"><div><label for="newName">Product name *</label><input id="newName" placeholder="e.g. Canned sardines"></div><div><label for="newBarcode">Barcode (optional)</label><input id="newBarcode" placeholder="Barcode / code"></div></div>
+      <div class="row"><div><label for="newName">Product name *</label><input id="newName" placeholder="e.g. Canned sardines"></div><div><label for="newBarcode">Barcode (optional)</label><input id="newBarcode" placeholder="Scan or type barcode"></div></div>
+      <div class="actions"><button class="secondary" id="newBarcodeScanButton" type="button">📷 Scan product barcode</button><button class="secondary hidden" id="newBarcodeStopButton" type="button">Stop scanner</button></div>
+      <div id="newBarcodeScannerBox" class="hidden"></div>
       <div class="row3"><div><label for="newCost">Cost price ₱ *</label><input id="newCost" type="number" min="0" step="0.01" value="0"></div><div><label for="newPrice">Selling price ₱ *</label><input id="newPrice" type="number" min="0" step="0.01" value="0"></div><div><label for="newStock">Opening stock *</label><input id="newStock" type="number" min="0" step="0.01" value="0"></div></div>
       <div class="actions"><button class="primary" id="addProductButton">Save product</button></div>
       <p class="muted">Products and stock are shared between signed-in phones.</p>
@@ -438,19 +440,46 @@
       countDrafts=[];localWrite();await syncAll();renderCountDrafts();message("Stock count applied to shared inventory.","success");
     }catch(e){message("Some counts may not have applied. Refresh and check stock: "+e.message,"error");}
   }
-  async function deleteSale(saleId) {
+  async function voidSaleItem(saleId, itemIndex) {
     const sale=sales.find(x=>x.id===saleId); if(!sale)return;
-    if(!confirm("Delete this test sale? Its sold quantities will be added back to inventory. This cannot be undone."))return;
+    const item=(sale.items||[])[itemIndex]; if(!item)return;
+    const soldQty=num(item.qty);
+    const answer=prompt(`Void how many of ${item.name}? Sold quantity: ${soldQty}`,String(soldQty));
+    if(answer===null)return;
+    const qty=num(answer);
+    if(!Number.isFinite(qty)||qty<=0||qty>soldQty)return message("Enter a quantity greater than zero and no more than the sold quantity.","error");
+    if(!confirm(`Void ${qty} × ${item.name}? This will return the quantity to inventory and reduce this sale's total.`))return;
     try {
-      for(const item of (sale.items||[])) {
+      const pid=item.product_id||item.productId;
+      const p=products.find(x=>x.id===pid);
+      if(p) await updateProduct(p,{stock:num(p.stock)+qty});
+      const remaining=[...(sale.items||[])].map((x,i)=>{
+        if(i!==itemIndex)return {...x};
+        const newQty=num(x.qty)-qty;
+        return newQty>0?{...x,qty:newQty,subtotal:newQty*num(x.price)}:null;
+      }).filter(Boolean);
+      const total=remaining.reduce((sum,x)=>sum+num(x.price)*num(x.qty),0);
+      const grossProfit=remaining.reduce((sum,x)=>sum+(num(x.price)-num(x.cost))*num(x.qty),0);
+      const cash=num(sale.cash), change=Math.max(0,cash-total);
+      const {error}=await db.from("sales").update({items:remaining,total,cash,change_amount:change,gross_profit:grossProfit}).eq("id",saleId);
+      if(error)throw error;
+      await syncAll();
+      message(remaining.length?"Item voided. Inventory and sale total updated.":"Sale fully voided. Inventory restored; history entry kept for record.","success");
+    } catch(e) { message("Void failed: "+e.message+" Check database update permissions and inventory.","error"); try{await syncAll();}catch{} }
+  }
+  async function voidWholeSale(saleId) {
+    const sale=sales.find(x=>x.id===saleId); if(!sale || !sale.items?.length)return;
+    if(!confirm("VOID THIS ENTIRE SALE? All sold quantities will be returned to inventory and the sale total will become ₱0. This will remain in history as a voided record."))return;
+    try {
+      for(const item of sale.items) {
         const pid=item.product_id||item.productId;
         const p=products.find(x=>x.id===pid);
         if(p) await updateProduct(p,{stock:num(p.stock)+num(item.qty)});
       }
-      const {error}=await db.from("sales").delete().eq("id",saleId);
+      const {error}=await db.from("sales").update({items:[],total:0,cash:num(sale.cash),change_amount:num(sale.cash),gross_profit:0}).eq("id",saleId);
       if(error)throw error;
-      await syncAll();message("Sale deleted and stock restored.","success");
-    } catch(e) { message("Could not fully delete sale. Refresh and check inventory and sales: "+e.message,"error"); }
+      await syncAll();message("Sale voided and inventory restored.","success");
+    } catch(e) {message("Void failed: "+e.message+" Check database update permissions and inventory.","error");try{await syncAll();}catch{}}
   }
   function renderReports() {
     $("metricProducts").textContent=products.length;
@@ -463,8 +492,9 @@
     const units=monthly.reduce((s,x)=>s+(Array.isArray(x.items)?x.items.reduce((a,i)=>a+num(i.qty),0):0),0);
     $("monthSummary").innerHTML=`<div class="grid"><div class="metric"><span>Number of sales</span><strong>${monthly.length}</strong></div><div class="metric"><span>Items sold</span><strong>${units}</strong></div><div class="metric"><span>Total cash sales</span><strong>${money(salesTotal)}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div></div><p class="muted" style="margin-top:10px">Gross profit is an estimate based on recorded product cost at the time of sale. It does not subtract other expenses, household use, or missing stock.</p>`;
     const recent=[...sales].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,100);
-    $("salesTable").innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Items</th><th>Total</th><th>Cash</th><th>Change</th><th>Gross profit</th><th>Action</th></tr></thead><tbody>${recent.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}</td><td>${Array.isArray(s.items)?s.items.reduce((a,i)=>a+num(i.qty),0):0}</td><td>${money(s.total)}</td><td>${money(s.cash)}</td><td>${money(s.change)}</td><td>${money(s.grossProfit)}</td><td><button class="danger small" data-delete-sale="${escapeHtml(s.id)}">Delete</button></td></tr>`).join("")}</tbody></table>`:'<p class="muted">No sales recorded yet.</p>';
-    $("salesTable").querySelectorAll("[data-delete-sale]").forEach(b=>b.addEventListener("click",()=>deleteSale(b.dataset.deleteSale)));
+    $("salesTable").innerHTML=recent.length?`<table><thead><tr><th>Date / Status</th><th>Items and void controls</th><th>Total</th><th>Cash</th><th>Change</th><th>Gross profit</th><th>Action</th></tr></thead><tbody>${recent.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}${(!s.items||!s.items.length)?'<br><span class="pill bad">VOIDED</span>':''}</td><td>${Array.isArray(s.items)&&s.items.length?s.items.map((it,i)=>`<div style="margin-bottom:7px"><strong>${escapeHtml(it.name||'Item')}</strong> × ${num(it.qty)}<br><span class="muted">${money(num(it.price)*num(it.qty))}</span> <button class="danger small" data-void-item="${escapeHtml(s.id)}" data-item-index="${i}">Void item</button></div>`).join(''):'<span class="muted">No active items</span>'}</td><td>${money(s.total)}</td><td>${money(s.cash)}</td><td>${money(s.change)}</td><td>${money(s.grossProfit)}</td><td>${s.items&&s.items.length?`<button class="danger small" data-void-sale="${escapeHtml(s.id)}">Void sale</button>`:'—'}</td></tr>`).join("")}</tbody></table>`:'<p class="muted">No sales recorded yet.</p>';
+    $("salesTable").querySelectorAll("[data-void-item]").forEach(b=>b.addEventListener("click",()=>voidSaleItem(b.dataset.voidItem,Number(b.dataset.itemIndex))));
+    $("salesTable").querySelectorAll("[data-void-sale]").forEach(b=>b.addEventListener("click",()=>voidWholeSale(b.dataset.voidSale)));
   }
   function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderReports();}
   function switchPage(id){
@@ -513,13 +543,26 @@
     if(scannerObj.current){try{await scannerObj.current.stop();scannerObj.current.clear();}catch{}scannerObj.current=null;}
     $(boxId).classList.add("hidden");$(startId).classList.remove("hidden");$(stopId).classList.add("hidden");
   }
+  async function startPreferredRearCamera(scannerInstance, onDecoded) {
+    // Prefer a rear camera whose label does not suggest ultrawide; fall back to environment-facing camera.
+    let cameraId = null;
+    try {
+      const cameras = await Html5Qrcode.getCameras();
+      const rear = cameras.filter(c => /back|rear|environment|main/i.test(c.label || ""));
+      const nonUltra = rear.find(c => !/ultra.?wide|ultrawide|0\.5x|0\.6x|wide angle/i.test(c.label || ""));
+      cameraId = (nonUltra || rear[0] || cameras.find(c => !/front|user/i.test(c.label || "")) || {}).id || null;
+    } catch {}
+    const config = {fps:10,qrbox:{width:230,height:160},aspectRatio:1.0};
+    if(cameraId) return scannerInstance.start(cameraId,config,onDecoded);
+    return scannerInstance.start({facingMode:"environment"},config,onDecoded);
+  }
   function setupProductScanner(startId,stopId,boxId,barcodeId,selectId,scannerObj) {
     $(startId).addEventListener("click",async()=>{
       if(!window.Html5Qrcode)return message("Scanner library did not load. Type the barcode instead.","error");
       $(boxId).classList.remove("hidden");$(startId).classList.add("hidden");$(stopId).classList.remove("hidden");
       try {
         scannerObj.current=new Html5Qrcode(boxId);
-        await scannerObj.current.start({facingMode:"environment"},{fps:10,qrbox:{width:230,height:160}},async decoded=>{
+        await startPreferredRearCamera(scannerObj.current,async decoded=>{
           $(barcodeId).value=decoded;
           const p=findProduct(decoded);
           if(!p){playPunchSound();message("Barcode scanned, but no matching product was found. Check the product barcode.","error");return;}
@@ -538,6 +581,21 @@
       $(selectId).value=p.id;playPunchSound();message("Selected: "+p.name,"success");
     });
   }
+  let registerScanner=null;
+  $("newBarcodeScanButton").addEventListener("click",async()=>{
+    if(!window.Html5Qrcode)return message("Scanner library did not load. Type the barcode instead.","error");
+    $("newBarcodeScannerBox").classList.remove("hidden");$("newBarcodeScanButton").classList.add("hidden");$("newBarcodeStopButton").classList.remove("hidden");
+    try {
+      registerScanner=new Html5Qrcode("newBarcodeScannerBox");
+      await startPreferredRearCamera(registerScanner,async decoded=>{
+        $("newBarcode").value=decoded;playPunchSound();
+        try{await registerScanner.stop();registerScanner.clear();}catch{}
+        registerScanner=null;$("newBarcodeScannerBox").classList.add("hidden");$("newBarcodeScanButton").classList.remove("hidden");$("newBarcodeStopButton").classList.add("hidden");
+        message("Barcode scanned. Complete product details and save.","success");
+      });
+    } catch(e) {try{if(registerScanner){await registerScanner.stop();registerScanner.clear();}}catch{}registerScanner=null;$("newBarcodeScannerBox").classList.add("hidden");$("newBarcodeScanButton").classList.remove("hidden");$("newBarcodeStopButton").classList.add("hidden");message("Camera could not start. Allow camera permission or type the barcode.","error");}
+  });
+  $("newBarcodeStopButton").addEventListener("click",async()=>{if(registerScanner){try{await registerScanner.stop();registerScanner.clear();}catch{}registerScanner=null;}$("newBarcodeScannerBox").classList.add("hidden");$("newBarcodeScanButton").classList.remove("hidden");$("newBarcodeStopButton").classList.add("hidden");});
   const stockScanner={current:null}, countScanner={current:null};
   setupProductScanner("stockScanButton","stockStopScanButton","stockScannerBox","stockBarcode","stockProduct",stockScanner);
   setupProductScanner("countScanButton","countStopScanButton","countScannerBox","countBarcode","countProduct",countScanner);
@@ -571,7 +629,7 @@
     $("scannerBox").classList.remove("hidden");$("startScannerButton").classList.add("hidden");$("stopScannerButton").classList.remove("hidden");
     try{
       scanner=new Html5Qrcode("scannerBox");
-      await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:230,height:160}},async decoded=>{
+      await startPreferredRearCamera(scanner,async decoded=>{
         $("scanCode").value=decoded;
         try{await scanner.stop();}catch{}
         scanner=null;$("scannerBox").classList.add("hidden");$("startScannerButton").classList.remove("hidden");$("stopScannerButton").classList.add("hidden");
