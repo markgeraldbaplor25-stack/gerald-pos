@@ -60,6 +60,10 @@
     #loginScreen .loginbox{width:min(430px,100%);background:white;border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 12px 40px #00000012}
     #loginScreen h1{color:var(--green);font-size:25px}
     #scannerBox{margin-top:10px}
+    .scanner-actions{display:flex;justify-content:center;margin:12px 0 4px}
+    .scanner-actions button{min-width:210px;display:flex;align-items:center;justify-content:center;gap:8px}
+    .search-results{display:grid;grid-template-columns:1fr;gap:6px;margin-top:7px;max-height:220px;overflow:auto}
+    .search-result{display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left;background:#f8faf8;border:1px solid var(--line);color:var(--ink)}
     footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
     @media(min-width:760px){.layout{display:grid;grid-template-columns:1.1fr .9fr;gap:12px}.items{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.metric strong{font-size:17px}.row3{grid-template-columns:1fr 1fr}.items{grid-template-columns:repeat(2,minmax(0,1fr))}header h1{font-size:21px}.report-controls{grid-template-columns:1fr}}
@@ -120,10 +124,12 @@
         <div class="card">
           <h2>Add item to sale</h2>
           <label for="scanCode">Barcode / product code</label>
-          <div class="row"><input id="scanCode" placeholder="Scan or type code"><button class="primary" id="addCodeButton">Add item</button></div>
-          <div class="actions"><button class="secondary" id="startScannerButton">Open camera scanner</button><button class="secondary hidden" id="stopScannerButton">Stop scanner</button></div>
+          <div class="row"><input id="scanCode" placeholder="Scan or type barcode"><button class="primary" id="addCodeButton">Add item</button></div>
+          <div class="scanner-actions"><button class="secondary" id="startScannerButton"><span aria-hidden="true">📷</span> Open camera scanner</button><button class="secondary hidden" id="stopScannerButton">Stop scanner</button></div>
           <div id="scannerBox" class="hidden"></div>
-          <label for="productSearch">Find quick item by name</label><input id="productSearch" placeholder="Search no-barcode products...">
+          <label for="saleProductSearch">Search any product by name</label><input id="saleProductSearch" placeholder="Type product name if scanner fails..." autocomplete="off">
+          <div id="saleProductMatches" class="search-results"></div>
+          <label for="productSearch">Find quick item by name</label><input id="productSearch" placeholder="Search no-barcode quick buttons...">
           <div class="quick-settings"><label for="quickCategoryFilter" style="margin:0">Category</label><select id="quickCategoryFilter"><option value="all">All categories</option></select><span class="muted">Only selected no-barcode items appear here.</span></div>
           <div id="quickItems" class="items" style="margin-top:10px"></div>
         </div>
@@ -133,7 +139,8 @@
           <h2>Current sale</h2>
           <div id="cartList" class="muted">No items added.</div>
           <div class="metric" style="margin-top:12px"><span>Total</span><strong id="cartTotal">₱0.00</strong></div>
-          <label for="cashReceived">Cash received</label><input id="cashReceived" type="number" min="0" step="0.01" placeholder="0.00">
+          <label for="cashReceived">Cash received (optional)</label><input id="cashReceived" type="number" min="0" step="0.01" placeholder="Leave blank if exact amount">
+          <div class="actions"><button class="secondary" id="exactAmountButton" type="button">✓ Exact Amount</button></div>
           <div class="metric" style="margin-top:9px"><span>Change</span><strong id="changeDue">₱0.00</strong></div>
           <div class="actions"><button class="primary" id="checkoutButton">Complete cash sale</button><button class="secondary" id="clearCartButton">Clear</button></div>
         </div>
@@ -204,7 +211,7 @@
     </div>
     <div class="card" style="margin-top:12px">
       <h2>Month-end summary</h2>
-      <div class="row"><div><label for="reportMonth">Month</label><input id="reportMonth" type="month"></div><div><label>&nbsp;</label><button class="primary" id="refreshReportsButton" style="width:100%">Refresh summary</button></div></div>
+      <div class="row"><div><label for="summaryMonth">Month</label><input id="summaryMonth" type="month"></div><div><label>&nbsp;</label><button class="primary" id="refreshReportsButton" style="width:100%">Refresh summary</button></div></div>
       <div id="monthSummary" style="margin-top:12px"></div>
     </div>
     <div class="card"><h2>Recent sales</h2><div id="salesTable" class="tablewrap"></div></div>
@@ -349,6 +356,17 @@
     } else cart.push({productId:p.id,name:p.name,barcode:p.barcode,price:num(p.price),cost:num(p.cost),qty:1});
     playPunchSound(); $("scanCode").value=""; renderCart();
   }
+  function renderSaleProductMatches() {
+    const q=$("saleProductSearch").value.trim().toLowerCase();
+    const box=$("saleProductMatches");
+    if(!q){box.innerHTML="";return;}
+    const list=products.filter(p=>p.name.toLowerCase().includes(q)||String(p.barcode||"").toLowerCase().includes(q)).slice(0,10);
+    box.innerHTML=list.map(p=>`<button type="button" class="search-result" data-sale-product="${escapeHtml(p.id)}"><span><strong>${escapeHtml(p.name)}</strong><br><small>${p.noBarcode?"No barcode":escapeHtml(p.barcode||"No barcode")} · Stock: ${num(p.stock)}</small></span><strong>${money(p.price)}</strong></button>`).join("") || '<p class="muted">No matching product found.</p>';
+    box.querySelectorAll("[data-sale-product]").forEach(b=>b.addEventListener("click",()=>{
+      const p=products.find(x=>x.id===b.dataset.saleProduct);
+      addProductToCart(p);$("saleProductSearch").value="";box.innerHTML="";
+    }));
+  }
   function renderQuickItems() {
     const search=$("productSearch").value.trim().toLowerCase();
     const category=$("quickCategoryFilter").value||"all";
@@ -389,8 +407,10 @@
   async function checkout() {
     if(busy)return;
     if(!cart.length) return message("Add at least one item first.","error");
-    const total=cartTotal(), cash=num($("cashReceived").value);
-    if(cash<total) return message("Cash received is less than the total.","error");
+    const total=cartTotal();
+    const cashInput=$("cashReceived").value.trim();
+    const cash=cashInput===""?total:num(cashInput);
+    if(cash<total) return message("Cash received is less than the total. Use Exact Amount if the guest pays the exact total.","error");
     for(const line of cart) {
       const p=products.find(x=>x.id===line.productId);
       if(!p || num(p.stock)<line.qty) return message("Stock changed or is insufficient for "+line.name+". Refresh the app and try again.","error");
@@ -588,7 +608,7 @@
   function renderReports() {
     $("metricProducts").textContent=products.length;
     $("metricStock").textContent=products.reduce((s,p)=>s+num(p.stock),0).toLocaleString("en-PH");
-    const month=$("reportMonth").value || new Date().toISOString().slice(0,7);
+    const month=$("summaryMonth").value || new Date().toISOString().slice(0,7);
     const monthly=sales.filter(s=>String(s.day||s.date||"").slice(0,7)===month);
     $("metricSales").textContent=money(monthly.reduce((s,x)=>s+num(x.total),0));
     $("metricProfit").textContent=money(monthly.reduce((s,x)=>s+num(x.grossProfit),0));
@@ -715,11 +735,13 @@
   $("addCodeButton").addEventListener("click",()=>addProductToCart(findProduct($("scanCode").value)));
   $("scanCode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addProductToCart(findProduct(e.target.value));}});
   $("productSearch").addEventListener("input",renderQuickItems);
+  $("saleProductSearch").addEventListener("input",renderSaleProductMatches);
+  $("exactAmountButton").addEventListener("click",()=>{$("cashReceived").value="";renderCart();message("Exact Amount selected. Cash will be recorded as the sale total.","success");});
   $("quickCategoryFilter").addEventListener("change",renderQuickItems);
   $("stockProductSearch").addEventListener("input",renderStockProductMatches);
   $("cashReceived").addEventListener("input",renderCart);
   $("checkoutButton").addEventListener("click",checkout);
-  $("clearCartButton").addEventListener("click",()=>{cart=[];$("cashReceived").value="";renderCart();});
+  $("clearCartButton").addEventListener("click",()=>{cart=[];$("cashReceived").value="";$("saleProductSearch").value="";$("saleProductMatches").innerHTML="";renderCart();});
   $("addProductButton").addEventListener("click",addNewProduct);
   $("productListSearch").addEventListener("input",renderProducts);
   $("stockInButton").addEventListener("click",stockIn);
@@ -731,6 +753,7 @@
   $("printReportButton").addEventListener("click",printGeneratedReport);
   $("reportType").addEventListener("change",()=>{$("reportDay").disabled=$("reportType").value!=="day";$("reportMonth").disabled=$("reportType").value!=="month";});
   $("reportMonth").value=localDateKey().slice(0,7);
+  $("summaryMonth").value=localDateKey().slice(0,7);
   $("reportDay").value=localDateKey();
   $("reportDay").disabled=false;$("reportMonth").disabled=true;
   $("exportButton").addEventListener("click",exportBackup);
