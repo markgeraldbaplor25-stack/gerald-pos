@@ -36,6 +36,13 @@
     .metric span{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
     .metric strong{font-size:20px;overflow-wrap:anywhere}
     .items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .category-heading{grid-column:1/-1;font-size:13px;font-weight:800;color:var(--green);padding:8px 2px 2px;border-bottom:1px solid var(--line)}
+    .inline-check{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin:10px 0}
+    .inline-check input{width:auto}
+    .report-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+    .quick-settings{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+    .quick-settings select{max-width:240px}
+    .print-heading{display:none}
     .item{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;text-align:left;color:var(--ink)}
     .item strong{display:block;margin-bottom:5px}
     .item span{font-size:12px;color:var(--muted)}
@@ -55,7 +62,18 @@
     #scannerBox{margin-top:10px}
     footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
     @media(min-width:760px){.layout{display:grid;grid-template-columns:1.1fr .9fr;gap:12px}.items{grid-template-columns:repeat(3,minmax(0,1fr))}}
-    @media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.metric strong{font-size:17px}.row3{grid-template-columns:1fr 1fr}.items{grid-template-columns:repeat(2,minmax(0,1fr))}header h1{font-size:21px}}
+    @media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.metric strong{font-size:17px}.row3{grid-template-columns:1fr 1fr}.items{grid-template-columns:repeat(2,minmax(0,1fr))}header h1{font-size:21px}.report-controls{grid-template-columns:1fr}}
+    @media print{
+      @page{size:auto;margin:12mm}
+      body{background:#fff!important}
+      body.printing *{visibility:hidden!important}
+      body.printing #generatedReport,body.printing #generatedReport *{visibility:visible!important}
+      body.printing #generatedReport{display:block!important;position:absolute;left:0;top:0;width:100%;border:0;box-shadow:none;padding:0;margin:0}
+      body.printing #generatedReport .print-heading{display:block!important}
+      body.printing #generatedReport table{min-width:0;width:100%;font-size:10px}
+      body.printing #generatedReport th,body.printing #generatedReport td{padding:5px;border:1px solid #ccc}
+      body.printing #generatedReport .metric{border:1px solid #bbb;background:#fff}
+    }
   </style>
 </head>
 <body>
@@ -92,6 +110,11 @@
   </div>
 
   <section id="salesPage" class="page">
+    <div class="card">
+      <h2>Today's Sales</h2>
+      <div class="grid" id="todaySalesSummary"></div>
+      <p class="muted" id="todaySalesDate" style="margin:9px 0 0"></p>
+    </div>
     <div class="layout">
       <div>
         <div class="card">
@@ -100,7 +123,8 @@
           <div class="row"><input id="scanCode" placeholder="Scan or type code"><button class="primary" id="addCodeButton">Add item</button></div>
           <div class="actions"><button class="secondary" id="startScannerButton">Open camera scanner</button><button class="secondary hidden" id="stopScannerButton">Stop scanner</button></div>
           <div id="scannerBox" class="hidden"></div>
-          <label for="productSearch">Or find product by name</label><input id="productSearch" placeholder="Search products...">
+          <label for="productSearch">Find quick item by name</label><input id="productSearch" placeholder="Search no-barcode products...">
+          <div class="quick-settings"><label for="quickCategoryFilter" style="margin:0">Category</label><select id="quickCategoryFilter"><option value="all">All categories</option></select><span class="muted">Only selected no-barcode items appear here.</span></div>
           <div id="quickItems" class="items" style="margin-top:10px"></div>
         </div>
       </div>
@@ -121,19 +145,22 @@
     <div class="card">
       <h2>Add product</h2>
       <div class="row"><div><label for="newName">Product name *</label><input id="newName" placeholder="e.g. Canned sardines"></div><div><label for="newBarcode">Barcode (optional)</label><input id="newBarcode" placeholder="Scan or type barcode"></div></div>
+      <div class="row"><div><label for="newCategory">Category</label><input id="newCategory" placeholder="e.g. Canned goods" value="Uncategorized"></div><div><label>&nbsp;</label><label class="inline-check"><input id="newQuickShow" type="checkbox" checked> Show on quick buttons (no barcode only)</label></div></div>
       <div class="actions"><button class="secondary" id="newBarcodeScanButton" type="button">📷 Scan product barcode</button><button class="secondary hidden" id="newBarcodeStopButton" type="button">Stop scanner</button></div>
       <div id="newBarcodeScannerBox" class="hidden"></div>
       <div class="row3"><div><label for="newCost">Cost price ₱ *</label><input id="newCost" type="number" min="0" step="0.01" value="0"></div><div><label for="newPrice">Selling price ₱ *</label><input id="newPrice" type="number" min="0" step="0.01" value="0"></div><div><label for="newStock">Opening stock *</label><input id="newStock" type="number" min="0" step="0.01" value="0"></div></div>
       <div class="actions"><button class="primary" id="addProductButton">Save product</button></div>
       <p class="muted">Products and stock are shared between signed-in phones.</p>
     </div>
-    <div class="card"><h2>Product list</h2><input id="productListSearch" placeholder="Search product list..." style="margin-bottom:10px"><div id="productsTable" class="tablewrap"></div></div>
+    <div class="card"><h2>Product list</h2><p class="muted">Edit cost price, selling price, stock, category, barcode, and quick-button visibility.</p><input id="productListSearch" placeholder="Search product list..." style="margin-bottom:10px"><div id="productsTable" class="tablewrap"></div></div>
   </section>
 
   <section id="stockPage" class="page hidden">
     <div class="card">
       <h2>Stock in / Restock</h2>
-      <label for="stockProduct">Product</label><select id="stockProduct"></select>
+      <label for="stockProductSearch">Search product by name or barcode</label><input id="stockProductSearch" placeholder="Type a product name or barcode..." autocomplete="off">
+      <div id="stockProductMatches" class="items" style="margin-top:8px"></div>
+      <label for="stockProduct">Selected product</label><select id="stockProduct"></select>
       <label for="stockBarcode">Scan barcode to select product (optional)</label>
       <div class="row"><input id="stockBarcode" placeholder="Scan or type barcode"><button class="secondary" id="stockScanButton" type="button">📷 Scan</button></div>
       <div id="stockScannerBox" class="hidden"></div>
@@ -163,6 +190,17 @@
       <div class="metric"><span>Items in stock</span><strong id="metricStock">0</strong></div>
       <div class="metric"><span>Sales this month</span><strong id="metricSales">₱0.00</strong></div>
       <div class="metric"><span>Estimated gross profit this month</span><strong id="metricProfit">₱0.00</strong></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Generate sales report</h2>
+      <p class="muted">Generate a daily or monthly sales report. Use Print, then choose Save as PDF in your phone's print menu.</p>
+      <div class="report-controls">
+        <div><label for="reportType">Report type</label><select id="reportType"><option value="day">Sales per day</option><option value="month">Sales per month</option></select></div>
+        <div><label for="reportDay">Select day</label><input id="reportDay" type="date"></div>
+        <div><label for="reportMonth">Select month</label><input id="reportMonth" type="month"></div>
+      </div>
+      <div class="actions"><button class="primary" id="generateReportButton">Generate report</button><button class="secondary" id="printReportButton" disabled>Print / Save as PDF</button></div>
+      <div id="generatedReport" class="card" style="margin-top:12px"><p class="muted">Choose a report type and press Generate report.</p></div>
     </div>
     <div class="card" style="margin-top:12px">
       <h2>Month-end summary</h2>
@@ -228,7 +266,7 @@
     return { products:pr.data||[], sales:sr.data||[] };
   }
   function productFromDb(p) {
-    return {id:p.id, barcode:p.barcode || "", name:p.name || "", cost:num(p.cost), price:num(p.price), stock:num(p.stock), noBarcode:!!p.no_barcode};
+    return {id:p.id, barcode:p.barcode || "", name:p.name || "", cost:num(p.cost), price:num(p.price), stock:num(p.stock), noBarcode:!!p.no_barcode, category:String(p.category||"Uncategorized"), quickShow:p.quick_show!==false};
   }
   function saleFromDb(s) {
     return {id:s.id,date:s.date,day:s.day,items:Array.isArray(s.items)?s.items:[],total:num(s.total),cash:num(s.cash),change:num(s.change_amount),grossProfit:num(s.gross_profit)};
@@ -238,7 +276,7 @@
     if(cloudProducts.length===0) {
       const oldProducts=localRead(LOCAL_PRODUCTS,[]);
       for(const p of oldProducts) {
-        const row={name:String(p.name||"Unnamed product"),barcode:String(p.barcode||""),cost:num(p.cost),price:num(p.price),stock:num(p.stock),no_barcode:!!(p.noBarcode||p.no_barcode)};
+        const row={name:String(p.name||"Unnamed product"),barcode:String(p.barcode||""),cost:num(p.cost),price:num(p.price),stock:num(p.stock),no_barcode:!!(p.noBarcode||p.no_barcode),category:String(p.category||"Uncategorized"),quick_show:p.quickShow!==false};
         const {error}=await db.from("products").insert(row);
         if(error) throw new Error("Could not migrate a local product: "+error.message);
       }
@@ -270,7 +308,7 @@
     if(error) throw new Error(error.message);
   }
   async function insertProduct(p) {
-    const row={name:p.name,barcode:p.barcode||"",cost:num(p.cost),price:num(p.price),stock:num(p.stock),no_barcode:!!p.noBarcode};
+    const row={name:p.name,barcode:p.barcode||"",cost:num(p.cost),price:num(p.price),stock:num(p.stock),no_barcode:!!p.noBarcode,category:String(p.category||"Uncategorized"),quick_show:p.quickShow!==false};
     const {data,error}=await db.from("products").insert(row).select().single();
     if(error) throw new Error(error.message);
     return productFromDb(data);
@@ -313,9 +351,22 @@
   }
   function renderQuickItems() {
     const search=$("productSearch").value.trim().toLowerCase();
-    const list=products.filter(p=>!search || p.name.toLowerCase().includes(search) || String(p.barcode).toLowerCase().includes(search)).slice(0,60);
-    $("quickItems").innerHTML=list.length?list.map(p=>`<button class="item" data-quick="${escapeHtml(p.id)}"><strong>${escapeHtml(p.name)}</strong><span>${money(p.price)} • Stock: ${p.stock}</span></button>`).join(""):'<p class="muted">No products found.</p>';
+    const category=$("quickCategoryFilter").value||"all";
+    const list=products.filter(p=>p.noBarcode && p.quickShow!==false &&
+      (!search || p.name.toLowerCase().includes(search) || String(p.barcode).toLowerCase().includes(search)) &&
+      (category==="all" || (p.category||"Uncategorized")===category));
+    const groups={};
+    list.forEach(p=>{const c=p.category||"Uncategorized";(groups[c] ||= []).push(p);});
+    const html=Object.keys(groups).sort((a,b)=>a.localeCompare(b)).map(c=>
+      `<div class="category-heading">${escapeHtml(c)}</div>`+groups[c].sort((a,b)=>a.name.localeCompare(b.name)).map(p=>
+      `<button class="item" data-quick="${escapeHtml(p.id)}"><strong>${escapeHtml(p.name)}</strong><span>${money(p.price)} • Stock: ${p.stock}</span></button>`).join("")
+    ).join("");
+    $("quickItems").innerHTML=html||'<p class="muted">No quick items found. Add a no-barcode product and enable “Show on quick buttons”.</p>';
     $("quickItems").querySelectorAll("[data-quick]").forEach(b=>b.addEventListener("click",()=>addProductToCart(products.find(p=>p.id===b.dataset.quick))));
+    const categories=[...new Set(products.filter(p=>p.noBarcode&&p.quickShow!==false).map(p=>p.category||"Uncategorized"))].sort((a,b)=>a.localeCompare(b));
+    const old=category;
+    $("quickCategoryFilter").innerHTML='<option value="all">All categories</option>'+categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    if(old==="all"||categories.includes(old))$("quickCategoryFilter").value=old;else $("quickCategoryFilter").value="all";
   }
   function cartTotal() { return cart.reduce((sum,x)=>sum+x.price*x.qty,0); }
   function renderCart() {
@@ -365,21 +416,22 @@
   }
   async function addNewProduct() {
     const name=$("newName").value.trim(), barcode=$("newBarcode").value.trim();
+    const category=$("newCategory").value.trim()||"Uncategorized", quickShow=$("newQuickShow").checked;
     const cost=num($("newCost").value), price=num($("newPrice").value), stock=num($("newStock").value);
     if(!name) return message("Product name is required.","error");
     if(cost<0||price<0||stock<0) return message("Cost, price, and stock cannot be negative.","error");
     if(barcode && products.some(p=>String(p.barcode).toLowerCase()===barcode.toLowerCase())) return message("That barcode already exists.","error");
     try {
-      const p=await insertProduct({name,barcode:barcode||"NOBC-"+Date.now(),cost,price,stock,noBarcode:!barcode});
+      const p=await insertProduct({name,barcode:barcode||"NOBC-"+Date.now(),cost,price,stock,noBarcode:!barcode,category,quickShow});
       products.push(p); localWrite(); renderAll();
-      ["newName","newBarcode"].forEach(id=>$(id).value=""); $("newCost").value="0";$("newPrice").value="0";$("newStock").value="0";
+      ["newName","newBarcode"].forEach(id=>$(id).value=""); $("newCost").value="0";$("newPrice").value="0";$("newStock").value="0";$("newCategory").value="Uncategorized";$("newQuickShow").checked=true;
       message("Product saved and shared with your other phone.","success");
     } catch(e){message("Could not save product: "+e.message,"error");}
   }
   function renderProducts() {
     const q=$("productListSearch").value.trim().toLowerCase();
     const list=products.filter(p=>p.name.toLowerCase().includes(q)||String(p.barcode).toLowerCase().includes(q));
-    $("productsTable").innerHTML=list.length?`<table><thead><tr><th>Product</th><th>Barcode</th><th>Cost</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>${list.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.noBarcode?"—":p.barcode)}</td><td>${money(p.cost)}</td><td>${money(p.price)}</td><td>${p.stock}</td><td><button class="secondary small" data-edit="${escapeHtml(p.id)}">Edit</button> <button class="danger small" data-delete="${escapeHtml(p.id)}">Delete</button></td></tr>`).join("")}</tbody></table>`:'<p class="muted">No products yet. Add your first product above.</p>';
+    $("productsTable").innerHTML=list.length?`<table><thead><tr><th>Product</th><th>Category</th><th>Barcode</th><th>Cost</th><th>Selling price</th><th>Stock</th><th>Quick button</th><th>Actions</th></tr></thead><tbody>${list.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||"Uncategorized")}</td><td>${escapeHtml(p.noBarcode?"—":p.barcode)}</td><td>${money(p.cost)}</td><td>${money(p.price)}</td><td>${p.stock}</td><td>${p.noBarcode&&p.quickShow!==false?'Shown':'Hidden'}</td><td><button class="secondary small" data-edit="${escapeHtml(p.id)}">Edit</button> <button class="danger small" data-delete="${escapeHtml(p.id)}">Delete</button></td></tr>`).join("")}</tbody></table>`:'<p class="muted">No products yet. Add your first product above.</p>';
     $("productsTable").querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>editProduct(b.dataset.edit)));
     $("productsTable").querySelectorAll("[data-delete]").forEach(b=>b.addEventListener("click",()=>deleteProduct(b.dataset.delete)));
     fillProductSelects();
@@ -387,15 +439,19 @@
   async function editProduct(id) {
     const p=products.find(x=>x.id===id); if(!p)return;
     const name=prompt("Product name:",p.name); if(name===null)return;
-    const costText=prompt("Cost price:",String(p.cost));if(costText===null)return;
-    const priceText=prompt("Selling price:",String(p.price));if(priceText===null)return;
-    const barcode=prompt("Barcode (leave blank if none):",p.noBarcode?"":p.barcode);if(barcode===null)return;
+    const costText=prompt("Cost price per unit:",String(p.cost));if(costText===null)return;
+    const priceText=prompt("Selling price per unit:",String(p.price));if(priceText===null)return;
+    const stockText=prompt("Current stock quantity:",String(p.stock));if(stockText===null)return;
+    const barcode=prompt("Barcode (leave blank if no barcode):",p.noBarcode?"":p.barcode);if(barcode===null)return;
+    const category=prompt("Category (e.g. Snacks, Drinks, Canned goods):",p.category||"Uncategorized");if(category===null)return;
+    const quickText=prompt("Show on quick buttons? Type YES or NO (no-barcode items only):",p.quickShow!==false?"YES":"NO");if(quickText===null)return;
     if(!name.trim())return message("Product name cannot be blank.","error");
-    const cost=num(costText),price=num(priceText);
-    if(cost<0||price<0)return message("Prices cannot be negative.","error");
+    const cost=num(costText),price=num(priceText),stock=num(stockText),cleanBarcode=barcode.trim();
+    if(cost<0||price<0||stock<0)return message("Cost, selling price, and stock cannot be negative.","error");
+    if(cleanBarcode && products.some(x=>x.id!==p.id&&String(x.barcode).toLowerCase()===cleanBarcode.toLowerCase()))return message("That barcode is already used by another product.","error");
     try{
-      await updateProduct(p,{name:name.trim(),cost,price,barcode:barcode.trim()||("NOBC-"+Date.now()),no_barcode:!barcode.trim()});
-      await syncAll();message("Product updated.","success");
+      await updateProduct(p,{name:name.trim(),cost,price,stock,barcode:cleanBarcode||("NOBC-"+Date.now()),no_barcode:!cleanBarcode,category:category.trim()||"Uncategorized",quick_show:/^yes$/i.test(quickText.trim())});
+      await syncAll();message("Product details, prices, and stock updated.","success");
     }catch(e){message("Update failed: "+e.message,"error");}
   }
   async function deleteProduct(id) {
@@ -408,8 +464,24 @@
     }catch(e){message("Delete failed: "+e.message,"error");}
   }
   function fillProductSelects() {
+    const previousStock=$("stockProduct").value, previousCount=$("countProduct").value;
     const opts=products.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} — stock ${p.stock}</option>`).join("");
     ["stockProduct","countProduct"].forEach(id=>{$(id).innerHTML=opts||'<option value="">No products yet</option>';});
+    if(products.some(p=>p.id===previousStock))$("stockProduct").value=previousStock;
+    if(products.some(p=>p.id===previousCount))$("countProduct").value=previousCount;
+    renderStockProductMatches();
+  }
+  function renderStockProductMatches(){
+    const q=$("stockProductSearch").value.trim().toLowerCase();
+    if(!q){$("stockProductMatches").innerHTML='';return;}
+    const list=products.filter(p=>p.name.toLowerCase().includes(q)||String(p.barcode||"").toLowerCase().includes(q)).slice(0,12);
+    $("stockProductMatches").innerHTML=list.length?list.map(p=>`<button class="item" type="button" data-stock-match="${escapeHtml(p.id)}"><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(p.category||"Uncategorized")} • Stock: ${p.stock} • ${money(p.price)}</span></button>`).join(""):'<p class="muted">No matching product.</p>';
+    $("stockProductMatches").querySelectorAll("[data-stock-match]").forEach(b=>b.addEventListener("click",()=>{
+      $("stockProduct").value=b.dataset.stockMatch;
+      const p=products.find(x=>x.id===b.dataset.stockMatch);
+      $("stockProductSearch").value=p?p.name:"";$("stockProductMatches").innerHTML="";
+      if(p){$("stockCost").placeholder="Current cost: "+p.cost+" (blank keeps current)";message("Selected: "+p.name,"success");}
+    }));
   }
   async function stockIn() {
     const p=products.find(x=>x.id===$("stockProduct").value), qty=num($("stockQty").value), costText=$("stockCost").value.trim();
@@ -481,6 +553,38 @@
       await syncAll();message("Sale voided and inventory restored.","success");
     } catch(e) {message("Void failed: "+e.message+" Check database update permissions and inventory.","error");try{await syncAll();}catch{}}
   }
+  function localDateKey(date=new Date()){
+    return date.getFullYear()+"-"+String(date.getMonth()+1).padStart(2,"0")+"-"+String(date.getDate()).padStart(2,"0");
+  }
+  function saleDay(s){return String(s.day||s.date||"").slice(0,10);}
+  function renderTodaySales(){
+    const today=localDateKey();
+    const list=sales.filter(s=>saleDay(s)===today);
+    const total=list.reduce((sum,s)=>sum+num(s.total),0);
+    const profit=list.reduce((sum,s)=>sum+num(s.grossProfit),0);
+    const items=list.reduce((sum,s)=>sum+(s.items||[]).reduce((a,it)=>a+num(it.qty),0),0);
+    $("todaySalesSummary").innerHTML=`<div class="metric"><span>Sales total today</span><strong>${money(total)}</strong></div><div class="metric"><span>Transactions</span><strong>${list.length}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div><div class="metric"><span>Units sold</span><strong>${items}</strong></div>`;
+    $("todaySalesDate").textContent="Date: "+new Date().toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"});
+  }
+  function generateSalesReport(){
+    const type=$("reportType").value;
+    const key=type==="day"?$("reportDay").value:$("reportMonth").value;
+    if(!key)return message(type==="day"?"Choose a report date first.":"Choose a report month first.","error");
+    const list=sales.filter(s=>type==="day"?saleDay(s)===key:saleDay(s).slice(0,7)===key).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const total=list.reduce((sum,s)=>sum+num(s.total),0),profit=list.reduce((sum,s)=>sum+num(s.grossProfit),0);
+    const units=list.reduce((sum,s)=>sum+(s.items||[]).reduce((a,it)=>a+num(it.qty),0),0);
+    const label=type==="day"?new Date(key+"T12:00:00").toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"}):new Date(key+"-01T12:00:00").toLocaleDateString("en-PH",{year:"numeric",month:"long"});
+    const rows=list.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}</td><td>${(s.items||[]).map(it=>`${escapeHtml(it.name)} × ${num(it.qty)}`).join("<br>")||"VOIDED / no active items"}</td><td class="right">${money(s.total)}</td><td class="right">${money(s.cash)}</td><td class="right">${money(s.change)}</td><td class="right">${money(s.grossProfit)}</td></tr>`).join("");
+    $("generatedReport").innerHTML=`<div class="print-heading"><h1>Gerald POS</h1><p>Sales Report — ${escapeHtml(label)}</p><p>Generated: ${escapeHtml(new Date().toLocaleString("en-PH"))}</p></div><h2>${type==="day"?"Daily":"Monthly"} Sales Report — ${escapeHtml(label)}</h2><div class="grid"><div class="metric"><span>Transactions</span><strong>${list.length}</strong></div><div class="metric"><span>Units sold</span><strong>${units}</strong></div><div class="metric"><span>Total sales</span><strong>${money(total)}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div></div><div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Date / time</th><th>Items</th><th class="right">Sales</th><th class="right">Cash</th><th class="right">Change</th><th class="right">Gross profit</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="center">No sales for this period.</td></tr>'}</tbody><tfoot><tr><th colspan="2">TOTAL</th><th class="right">${money(total)}</th><th></th><th></th><th class="right">${money(profit)}</th></tr></tfoot></table></div><p class="muted">Estimated gross profit uses the product cost recorded at sale time and excludes other expenses, household use, and missing stock.</p>`;
+    $("printReportButton").disabled=false;
+    message("Sales report generated. You can print it or save as PDF.","success");
+  }
+  function printGeneratedReport(){
+    if(!$("generatedReport").innerText.trim()||$("printReportButton").disabled)return;
+    document.body.classList.add("printing");
+    window.print();
+    setTimeout(()=>document.body.classList.remove("printing"),1000);
+  }
   function renderReports() {
     $("metricProducts").textContent=products.length;
     $("metricStock").textContent=products.reduce((s,p)=>s+num(p.stock),0).toLocaleString("en-PH");
@@ -496,14 +600,14 @@
     $("salesTable").querySelectorAll("[data-void-item]").forEach(b=>b.addEventListener("click",()=>voidSaleItem(b.dataset.voidItem,Number(b.dataset.itemIndex))));
     $("salesTable").querySelectorAll("[data-void-sale]").forEach(b=>b.addEventListener("click",()=>voidWholeSale(b.dataset.voidSale)));
   }
-  function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderReports();}
+  function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderTodaySales();renderReports();}
   function switchPage(id){
     document.querySelectorAll(".page").forEach(p=>p.classList.toggle("hidden",p.id!==id));
     document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===id));
     if(id==="reportsPage")renderReports();
   }
   async function exportBackup(){
-    const data={app:"Gerald POS",version:2,exportedAt:new Date().toISOString(),products,sales};
+    const data={app:"Gerald POS",version:3,exportedAt:new Date().toISOString(),products,sales};
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="gerald-pos-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();URL.revokeObjectURL(a.href);
   }
@@ -515,7 +619,7 @@
       const current=await cloudLoad();
       if(current.products.length||current.sales.length)throw new Error("Restore stopped because cloud data already exists. This protects existing shared data from being overwritten.");
       for(const p of data.products){
-        const row={name:String(p.name||"Unnamed product"),barcode:String(p.barcode||""),cost:num(p.cost),price:num(p.price),stock:num(p.stock),no_barcode:!!(p.noBarcode||p.no_barcode)};
+        const row={name:String(p.name||"Unnamed product"),barcode:String(p.barcode||""),cost:num(p.cost),price:num(p.price),stock:num(p.stock),no_barcode:!!(p.noBarcode||p.no_barcode),category:String(p.category||"Uncategorized"),quick_show:p.quickShow!==false};
         const {error}=await db.from("products").insert(row);if(error)throw error;
       }
       for(const s of data.sales){
@@ -611,6 +715,8 @@
   $("addCodeButton").addEventListener("click",()=>addProductToCart(findProduct($("scanCode").value)));
   $("scanCode").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addProductToCart(findProduct(e.target.value));}});
   $("productSearch").addEventListener("input",renderQuickItems);
+  $("quickCategoryFilter").addEventListener("change",renderQuickItems);
+  $("stockProductSearch").addEventListener("input",renderStockProductMatches);
   $("cashReceived").addEventListener("input",renderCart);
   $("checkoutButton").addEventListener("click",checkout);
   $("clearCartButton").addEventListener("click",()=>{cart=[];$("cashReceived").value="";renderCart();});
@@ -621,7 +727,12 @@
   $("applyCountButton").addEventListener("click",applyCounts);
   $("clearCountButton").addEventListener("click",()=>{if(confirm("Clear the current count list?")){countDrafts=[];localWrite();renderCountDrafts();}});
   $("refreshReportsButton").addEventListener("click",renderReports);
-  $("reportMonth").value=new Date().toISOString().slice(0,7);
+  $("generateReportButton").addEventListener("click",generateSalesReport);
+  $("printReportButton").addEventListener("click",printGeneratedReport);
+  $("reportType").addEventListener("change",()=>{$("reportDay").disabled=$("reportType").value!=="day";$("reportMonth").disabled=$("reportType").value!=="month";});
+  $("reportMonth").value=localDateKey().slice(0,7);
+  $("reportDay").value=localDateKey();
+  $("reportDay").disabled=false;$("reportMonth").disabled=true;
   $("exportButton").addEventListener("click",exportBackup);
   $("importButton").addEventListener("click",importBackup);
   $("startScannerButton").addEventListener("click",async()=>{
