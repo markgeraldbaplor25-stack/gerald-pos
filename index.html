@@ -126,6 +126,7 @@
     <button data-page="countPage">Stock Count</button>
     <button data-page="stockMonitorPage">Stock Monitoring</button>
     <button data-page="reportsPage">Reports</button>
+    <button data-page="assistantPage">Smart Assistant</button>
     <button data-page="backupPage">Backup</button>
   </div>
 
@@ -244,7 +245,42 @@
       <div class="row"><div><label for="summaryMonth">Month</label><input id="summaryMonth" type="month"></div><div><label>&nbsp;</label><button class="primary" id="refreshReportsButton" style="width:100%">Refresh summary</button></div></div>
       <div id="monthSummary" style="margin-top:12px"></div>
     </div>
-    <div class="card"><h2>Recent sales</h2><div id="salesTable" class="tablewrap"></div></div>
+    <div class="card" style="margin-top:12px">
+      <h2>Today's Recent Sales</h2>
+      <p class="muted">This section always shows sales recorded for today only.</p>
+      <div id="todayRecentSalesSummary" class="grid"></div>
+      <div id="todayRecentSalesTable" class="tablewrap" style="margin-top:10px"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Recent Sales by Day</h2>
+      <p class="muted">Choose a date to view sales for that day. Use “Search all history” to search across every recorded sale.</p>
+      <div class="report-controls">
+        <div><label for="recentSalesDay">Sales date</label><input id="recentSalesDay" type="date"></div>
+        <div><label for="recentSalesSearch">Search sales / product</label><input id="recentSalesSearch" type="search" placeholder="Transaction, product, barcode, amount..."></div>
+      </div>
+      <div class="row" style="align-items:center;margin-top:10px;gap:12px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;margin:0"><input id="recentSalesAllHistory" type="checkbox" style="width:auto"> Search all history</label>
+        <button class="secondary" id="clearRecentSalesFilters" type="button">Clear filters</button>
+        <button class="secondary" id="printRecentSalesButton" type="button">Print / Save as PDF</button>
+      </div>
+      <div id="recentSalesDaySummary" class="grid" style="margin-top:12px"></div>
+      <div id="recentSalesDayTable" class="tablewrap" style="margin-top:10px"></div>
+    </div>
+    <div class="card"><h2>All Recent Sales (latest 100)</h2><div id="salesTable" class="tablewrap"></div></div>
+  </section>
+
+  <section id="assistantPage" class="page hidden">
+    <div class="card">
+      <h2>Gerald POS Smart Assistant</h2>
+      <p class="muted">Free, rule-based business insights calculated from your loaded products and sales. No paid AI API is used. This page only analyzes data; it does not change products, stock, or sales.</p>
+      <div class="actions"><button class="primary" id="refreshAssistantButton" type="button">Refresh insights</button></div>
+      <div id="assistantSummary" class="grid" style="margin-top:12px"></div>
+    </div>
+    <div class="card"><h2>Business insights</h2><div id="assistantInsights"><p class="muted">Press Refresh insights to analyze your store data.</p></div></div>
+    <div class="card"><h2>Best sellers</h2><div id="assistantBestSellers" class="tablewrap"><p class="muted">No analysis yet.</p></div></div>
+    <div class="card"><h2>Suggested restock</h2><p class="muted">Items with 0–2 units in stock. Suggested quantities aim for 3 units; review before buying.</p><div id="assistantRestock" class="tablewrap"><p class="muted">No analysis yet.</p></div></div>
+    <div class="card"><h2>Slow-moving / no recorded sales</h2><div id="assistantSlowMovers" class="tablewrap"><p class="muted">No analysis yet.</p></div></div>
+    <div class="notice">Important: profit is an estimate based on stored sale-item costs when available. It does not subtract rent, electricity, spoilage, household use, or other expenses. Recommendations are suggestions, not automatic stock changes.</div>
   </section>
 
   <section id="backupPage" class="page hidden">
@@ -699,12 +735,117 @@
     $("salesTable").querySelectorAll("[data-void-item]").forEach(b=>b.addEventListener("click",()=>voidSaleItem(b.dataset.voidItem,Number(b.dataset.itemIndex))));
     $("salesTable").querySelectorAll("[data-void-sale]").forEach(b=>b.addEventListener("click",()=>voidWholeSale(b.dataset.voidSale)));
   }
-  function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderTodaySales();renderReports();renderStockMonitor();}
+  function recentSaleSearchText(s) {
+    const parts=[s.id,s.day,s.date,s.total,s.cash,s.change,s.change_amount];
+    for(const it of (Array.isArray(s.items)?s.items:[])) parts.push(it.name,it.barcode,it.qty,it.price,it.subtotal,(num(it.price)*num(it.qty)));
+    return parts.map(v=>String(v??"")).join(" ").toLowerCase();
+  }
+  function formatSaleDateTime(value) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "Unknown date";
+    const pad = n => String(n).padStart(2, "0");
+    const date = `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${d.getFullYear()}`;
+    const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    return `${date} ${time}`;
+  }
+  function renderRecentSalesByDay() {
+    const today=localDateKey();
+    const selected=$("recentSalesDay").value||today;
+    const query=$("recentSalesSearch").value.trim().toLowerCase();
+    const allHistory=$("recentSalesAllHistory").checked;
+    let list=[...sales].filter(s=>(allHistory||saleDay(s)===selected)&&(!query||recentSaleSearchText(s).includes(query)));
+    list.sort((a,b)=>new Date(b.date||b.day)-new Date(a.date||a.day));
+    const total=list.reduce((sum,s)=>sum+num(s.total),0);
+    const units=list.reduce((sum,s)=>sum+(Array.isArray(s.items)?s.items.reduce((a,it)=>a+num(it.qty),0):0),0);
+    const profit=list.reduce((sum,s)=>sum+num(s.grossProfit),0);
+    $("recentSalesDaySummary").innerHTML=`<div class="metric"><span>Matching transactions</span><strong>${list.length}</strong></div><div class="metric"><span>Recorded sales total</span><strong>${money(total)}</strong></div><div class="metric"><span>Items sold</span><strong>${units}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div>`;
+    $("recentSalesDayTable").innerHTML=list.length?`<table><thead><tr><th>Transaction Date &amp; Time</th><th>Items</th><th>Total</th><th>Cash</th><th>Change</th><th>Est. gross profit</th></tr></thead><tbody>${list.map(s=>`<tr><td>${escapeHtml(formatSaleDateTime(s.date||s.day))}${(!s.items||!s.items.length)?'<br><span class="pill bad">VOIDED</span>':''}</td><td>${Array.isArray(s.items)&&s.items.length?s.items.map(it=>`${escapeHtml(it.name||"Item")} × ${num(it.qty)} (${money(num(it.price)*num(it.qty))})`).join("<br>"):'<span class="muted">No active items</span>'}</td><td>${money(s.total)}</td><td>${money(s.cash)}</td><td>${money(s.change??s.change_amount)}</td><td>${money(s.grossProfit)}</td></tr>`).join("")}</tbody></table>`:'<p class="muted">No sales match this date or search.</p>';
+    $("todayRecentSalesSummary").innerHTML=`<div class="metric"><span>Transactions today</span><strong>${sales.filter(s=>saleDay(s)===today).length}</strong></div><div class="metric"><span>Sales total today</span><strong>${money(sales.filter(s=>saleDay(s)===today).reduce((sum,s)=>sum+num(s.total),0))}</strong></div>`;
+    const todayList=[...sales].filter(s=>saleDay(s)===today).sort((a,b)=>new Date(b.date||b.day)-new Date(a.date||a.day));
+    $("todayRecentSalesTable").innerHTML=todayList.length?`<table><thead><tr><th>Transaction Date &amp; Time</th><th>Items</th><th>Total</th></tr></thead><tbody>${todayList.map(s=>`<tr><td>${escapeHtml(formatSaleDateTime(s.date||s.day))}</td><td>${Array.isArray(s.items)&&s.items.length?s.items.map(it=>`${escapeHtml(it.name||"Item")} × ${num(it.qty)}`).join("<br>"):'<span class="muted">No active items</span>'}</td><td>${money(s.total)}</td></tr>`).join("")}</tbody></table>`:'<p class="muted">No sales recorded for today.</p>';
+  }
+  function printRecentSalesByDay(){
+    document.body.classList.add("printing");
+    window.print();
+    setTimeout(()=>document.body.classList.remove("printing"),1000);
+  }
+  function assistantDateKey(value) {
+    if(!value) return "";
+    const d = new Date(value);
+    if(Number.isNaN(d.getTime())) return String(value).slice(0,10);
+    return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Manila",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+  }
+  function assistantRender() {
+    const nowKey=assistantDateKey(new Date());
+    const monthKey=nowKey.slice(0,7);
+    const todaySales=sales.filter(s=>assistantDateKey(s.day||s.date)===nowKey);
+    const monthSales=sales.filter(s=>assistantDateKey(s.day||s.date).slice(0,7)===monthKey);
+    const todayTotal=todaySales.reduce((a,s)=>a+num(s.total),0);
+    const monthTotal=monthSales.reduce((a,s)=>a+num(s.total),0);
+    const stockUnits=products.reduce((a,p)=>a+num(p.stock),0);
+    const low=products.filter(p=>num(p.stock)<=2);
+    const zero=products.filter(p=>num(p.stock)<=0);
+    const estimatedRestock=low.reduce((a,p)=>a+Math.max(0,3-num(p.stock))*num(p.cost),0);
+    $("assistantSummary").innerHTML=`<div class="metric"><span>Sales today</span><strong>${money(todayTotal)}</strong></div><div class="metric"><span>Sales this month</span><strong>${money(monthTotal)}</strong></div><div class="metric"><span>Products out of stock</span><strong>${zero.length}</strong></div><div class="metric"><span>Low-stock items (0–2)</span><strong>${low.length}</strong></div>`;
+
+    const insights=[];
+    if(!sales.length) insights.push(`<li>No sales history is loaded yet, so sales trends and best sellers cannot be calculated.</li>`);
+    else {
+      insights.push(`<li><strong>Today's recorded sales:</strong> ${money(todayTotal)} from ${todaySales.length} transaction(s).</li>`);
+      insights.push(`<li><strong>This month's recorded sales:</strong> ${money(monthTotal)} from ${monthSales.length} transaction(s).</li>`);
+      if(todaySales.length===0) insights.push(`<li>No sales are recorded for today yet. Check that the POS is online and transactions are syncing if you expected sales.</li>`);
+    }
+    if(zero.length) insights.push(`<li><strong>Urgent:</strong> ${zero.length} product(s) have zero stock. Check the stock list before accepting sales for these items.</li>`);
+    else insights.push(`<li>No products are currently marked out of stock.</li>`);
+    if(low.length) insights.push(`<li><strong>Restock planning:</strong> ${low.length} product(s) have 0–2 units. Estimated cost to bring each to 3 units is ${money(estimatedRestock)} using the current stored cost.</li>`);
+    const profitKnown=monthSales.some(s=>num(s.grossProfit)!==0 || (Array.isArray(s.items)&&s.items.some(i=>i.cost!==undefined&&i.cost!==null)));
+    if(profitKnown){
+      const profit=monthSales.reduce((sum,s)=>sum+(Array.isArray(s.items)&&s.items.length?s.items.reduce((a,i)=>a+(num(i.price)-num(i.cost))*num(i.qty),0):num(s.grossProfit)),0);
+      insights.push(`<li><strong>Estimated gross profit this month:</strong> ${money(profit)}. This is not net profit and may be incomplete if older sale items do not contain cost.</li>`);
+    } else insights.push(`<li>Profit estimate unavailable or incomplete because sale-item cost data was not found in the loaded records.</li>`);
+    $("assistantInsights").innerHTML=`<ul style="padding-left:20px;line-height:1.7">${insights.join("")}</ul>`;
+
+    const soldByKey={};
+    for(const sale of sales){
+      const key=assistantDateKey(sale.day||sale.date);
+      if(!key) continue;
+      for(const item of (Array.isArray(sale.items)?sale.items:[])){
+        const pid=String(item.product_id??item.productId??"");
+        const name=String(item.name||"Unknown product");
+        const k=pid?"id:"+pid:"name:"+name.toLowerCase();
+        if(!soldByKey[k]) soldByKey[k]={name,qty:0,sales:0,lastDate:""};
+        soldByKey[k].qty+=num(item.qty);
+        soldByKey[k].sales+=item.subtotal!==undefined?num(item.subtotal):num(item.price)*num(item.qty);
+        if(key>soldByKey[k].lastDate) soldByKey[k].lastDate=key;
+      }
+    }
+    const best=Object.values(soldByKey).sort((a,b)=>b.qty-a.qty||b.sales-a.sales).slice(0,10);
+    $("assistantBestSellers").innerHTML=best.length?`<table><thead><tr><th>#</th><th>Product</th><th class="right">Qty sold (loaded history)</th><th class="right">Recorded sales</th></tr></thead><tbody>${best.map((x,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(x.name)}</td><td class="right">${x.qty}</td><td class="right">${money(x.sales)}</td></tr>`).join("")}</tbody></table>`:'<p class="muted">No active item sales are available to rank.</p>';
+
+    $("assistantRestock").innerHTML=low.length?`<table><thead><tr><th>Product</th><th>Category</th><th class="right">Stock</th><th class="right">Suggested buy</th><th class="right">Est. cost</th></tr></thead><tbody>${[...low].sort((a,b)=>num(a.stock)-num(b.stock)).map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||"Uncategorized")}</td><td class="right">${num(p.stock)}</td><td class="right">${Math.max(0,3-num(p.stock))}</td><td class="right">${money(Math.max(0,3-num(p.stock))*num(p.cost))}</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="4">Estimated total</th><th class="right">${money(estimatedRestock)}</th></tr></tfoot></table>`:'<p class="success notice">No products currently need suggested restocking under the 0–2 stock rule.</p>';
+
+    const recentCutoff=new Date();recentCutoff.setDate(recentCutoff.getDate()-30);
+    const recentCutoffKey=assistantDateKey(recentCutoff);
+    const recentSalesKeys=new Set();
+    const recentItemNames=new Set();
+    for(const sale of sales){const key=assistantDateKey(sale.day||sale.date);if(key>=recentCutoffKey&&key<=nowKey){recentSalesKeys.add(key);for(const item of (Array.isArray(sale.items)?sale.items:[])){recentItemNames.add(String(item.name||"").toLowerCase());if(item.product_id||item.productId)recentItemNames.add("id:"+String(item.product_id??item.productId));}}}
+    const enoughHistory=sales.some(s=>assistantDateKey(s.day||s.date)<=recentCutoffKey);
+    const slow=products.filter(p=>{
+      const byId=recentItemNames.has("id:"+String(p.id));
+      return !byId&&!recentItemNames.has(String(p.name||"").toLowerCase());
+    }).slice(0,30);
+    if(!sales.length) $("assistantSlowMovers").innerHTML='<p class="muted">Cannot identify slow movers without sales history.</p>';
+    else if(!enoughHistory) $("assistantSlowMovers").innerHTML='<p class="muted">Not enough history to make a reliable 30-day comparison. These products have no matching recorded sales in the available recent records, but this is not proof they are slow-moving.</p>'+(slow.length?`<ul>${slow.map(p=>`<li>${escapeHtml(p.name)} — stock ${num(p.stock)}</li>`).join("")}</ul>`:'<p>All products have matching sales in the available records.</p>');
+    else $("assistantSlowMovers").innerHTML=slow.length?`<p class="muted">No matching sales were found for these products in the last 30 days. Confirm the history is complete before acting.</p><ul>${slow.map(p=>`<li>${escapeHtml(p.name)} — stock ${num(p.stock)}</li>`).join("")}</ul>`:'<p class="success notice">Every listed product has at least one matching sale in the last 30 days, based on loaded records.</p>';
+  }
+
+  function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderTodaySales();renderReports();renderStockMonitor();if($("recentSalesDay"))renderRecentSalesByDay();}
   function switchPage(id){
     document.querySelectorAll(".page").forEach(p=>p.classList.toggle("hidden",p.id!==id));
     document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===id));
     if(id==="reportsPage")renderReports();
     if(id==="stockMonitorPage")renderStockMonitor();
+    if(id==="assistantPage")assistantRender();
   }
   async function exportBackup(){
     const data={app:"Gerald POS",version:3,exportedAt:new Date().toISOString(),products,sales};
@@ -832,6 +973,13 @@
   $("applyCountButton").addEventListener("click",applyCounts);
   $("clearCountButton").addEventListener("click",()=>{if(confirm("Clear the current count list?")){countDrafts=[];localWrite();renderCountDrafts();}});
   $("refreshReportsButton").addEventListener("click",renderReports);
+  $("recentSalesDay").value=localDateKey();
+  $("recentSalesDay").addEventListener("change",renderRecentSalesByDay);
+  $("recentSalesSearch").addEventListener("input",renderRecentSalesByDay);
+  $("recentSalesAllHistory").addEventListener("change",renderRecentSalesByDay);
+  $("clearRecentSalesFilters").addEventListener("click",()=>{$("recentSalesDay").value=localDateKey();$("recentSalesSearch").value="";$("recentSalesAllHistory").checked=false;renderRecentSalesByDay();});
+  $("printRecentSalesButton").addEventListener("click",printRecentSalesByDay);
+  $("refreshAssistantButton").addEventListener("click",assistantRender);
   $("generateReportButton").addEventListener("click",generateSalesReport);
   $("printReportButton").addEventListener("click",printGeneratedReport);
   $("reportType").addEventListener("change",()=>{$("reportDay").disabled=$("reportType").value!=="day";$("reportMonth").disabled=$("reportType").value!=="month";});
