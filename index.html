@@ -43,6 +43,15 @@
     .quick-settings{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
     .quick-settings select{max-width:240px}
     .print-heading{display:none}
+    .category-filter-row{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}
+    .category-chip{background:#e5e7eb;color:#26332a;padding:7px 10px;font-size:12px}
+    .category-chip.active{background:var(--green);color:#fff}
+    .summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+    .stock-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}
+    .stock-tabs button{flex:1;min-width:105px}
+    .stock-tabs .active{background:var(--green);color:#fff}
+    .category-row td{background:#eff6f0;color:#14532d;font-weight:800}
+    th[data-sort-category]{cursor:pointer;text-decoration:underline;text-underline-offset:3px}
     .item{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;text-align:left;color:var(--ink)}
     .item strong{display:block;margin-bottom:5px}
     .item span{font-size:12px;color:var(--muted)}
@@ -77,6 +86,12 @@
       body.printing #generatedReport table{min-width:0;width:100%;font-size:10px}
       body.printing #generatedReport th,body.printing #generatedReport td{padding:5px;border:1px solid #ccc}
       body.printing #generatedReport .metric{border:1px solid #bbb;background:#fff}
+      body.printingStock *{visibility:hidden!important}
+      body.printingStock #generatedStockReport,body.printingStock #generatedStockReport *{visibility:visible!important}
+      body.printingStock #generatedStockReport{display:block!important;visibility:visible!important;position:absolute;left:0;top:0;width:100%;border:0;box-shadow:none;padding:0;margin:0;background:#fff!important}
+      body.printingStock #generatedStockReport table{min-width:0;width:100%;font-size:10px}
+      body.printingStock #generatedStockReport th,body.printingStock #generatedStockReport td{padding:5px;border:1px solid #ccc}
+      body.printingStock #generatedStockReport .metric{border:1px solid #bbb;background:#fff}
     }
   </style>
 </head>
@@ -109,6 +124,7 @@
     <button data-page="productsPage">Products</button>
     <button data-page="stockPage">Stock In</button>
     <button data-page="countPage">Stock Count</button>
+    <button data-page="stockMonitorPage">Stock Monitoring</button>
     <button data-page="reportsPage">Reports</button>
     <button data-page="backupPage">Backup</button>
   </div>
@@ -159,7 +175,7 @@
       <div class="actions"><button class="primary" id="addProductButton">Save product</button></div>
       <p class="muted">Products and stock are shared between signed-in phones.</p>
     </div>
-    <div class="card"><h2>Product list</h2><p class="muted">Edit cost price, selling price, stock, category, barcode, and quick-button visibility.</p><input id="productListSearch" placeholder="Search product list..." style="margin-bottom:10px"><div id="productsTable" class="tablewrap"></div></div>
+    <div class="card"><h2>Product list</h2><p class="muted">Tap a category filter to group the list. Totals update for the products currently shown.</p><input id="productListSearch" placeholder="Search product name, barcode, or category..." style="margin-bottom:10px"><div id="productCategoryFilters" class="category-filter-row"></div><div id="productsTable" class="tablewrap"></div><div id="productTotals" class="summary-grid"></div></div>
   </section>
 
   <section id="stockPage" class="page hidden">
@@ -191,6 +207,20 @@
     </div>
   </section>
 
+  <section id="stockMonitorPage" class="page hidden">
+    <div class="card">
+      <h2>Stock Monitoring & Replenishment</h2>
+      <p class="muted">Out of stock = 0. Critical = 1–2 units. Available = 3 units or more.</p>
+      <label for="stockMonitorSearch">Search item by name, barcode, or category</label><input id="stockMonitorSearch" placeholder="Search products to replenish..." autocomplete="off">
+      <div class="stock-tabs"><button class="active" data-stock-filter="out">🔴 Out of Stock</button><button class="secondary" data-stock-filter="critical">🟠 Critical (1–2)</button><button class="secondary" data-stock-filter="available">🟢 Available (3+)</button><button class="secondary" data-stock-filter="all">All Items</button></div>
+      <div class="actions"><button class="primary" id="printStockButton" type="button">📄 Print / Save Stock List as PDF</button></div>
+      <p class="muted">Choose a stock status above, then press the button to print only that list. In the print dialog, select “Save as PDF” if you want a file.</p>
+      <div id="stockMonitorTable" class="tablewrap"></div>
+      <div id="stockMonitorTotals" class="summary-grid"></div>
+      <div id="generatedStockReport" class="card hidden"></div>
+    </div>
+  </section>
+
   <section id="reportsPage" class="page hidden">
     <div class="grid">
       <div class="metric"><span>Products</span><strong id="metricProducts">0</strong></div>
@@ -200,7 +230,7 @@
     </div>
     <div class="card" style="margin-top:12px">
       <h2>Generate sales report</h2>
-      <p class="muted">Generate a daily or monthly sales report. Use Print, then choose Save as PDF in your phone's print menu.</p>
+      <p class="muted">Sales are grouped by category and product. Each category has its own total; the grand total must reconcile to sales recorded for the selected period. Use Print, then choose Save as PDF.</p>
       <div class="report-controls">
         <div><label for="reportType">Report type</label><select id="reportType"><option value="day">Sales per day</option><option value="month">Sales per month</option></select></div>
         <div><label for="reportDay">Select day</label><input id="reportDay" type="date"></div>
@@ -235,13 +265,14 @@
 <script>
 (() => {
   "use strict";
+  // Live version: Supabase writes are enabled for normal POS operations.
   const SUPABASE_URL = "https://faeektqawupiyfedvznr.supabase.co";
   const SUPABASE_KEY = "sb_publishable_sz8xuQpB-4E4Vu1PmJY9mQ_U_mRe_vo";
   const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   const LOCAL_PRODUCTS = "geraldpos_new_products_v1";
   const LOCAL_SALES = "geraldpos_new_sales_v1";
   const LOCAL_COUNTS = "geraldpos_new_count_drafts_v1";
-  let user = null, products = [], sales = [], cart = [], countDrafts = [], scanner = null, busy = false;
+  let user = null, products = [], sales = [], cart = [], countDrafts = [], scanner = null, busy = false, productCategoryFilter = "all", stockMonitorFilter = "out";
 
   const $ = id => document.getElementById(id);
   const money = n => "₱" + Number(n || 0).toLocaleString("en-PH",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -418,7 +449,7 @@
     busy=true; busyButton("checkoutButton",true);
     try {
       const now=new Date(), day=now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
-      const items=cart.map(x=>({product_id:x.productId,name:x.name,barcode:x.barcode||"",qty:x.qty,price:x.price,cost:x.cost,subtotal:x.price*x.qty}));
+      const items=cart.map(x=>{const p=products.find(z=>z.id===x.productId);return {product_id:x.productId,name:x.name,barcode:x.barcode||"",category:String(p?.category||"Uncategorized"),qty:x.qty,price:x.price,cost:x.cost,subtotal:x.price*x.qty};});
       const grossProfit=cart.reduce((sum,x)=>sum+(x.price-x.cost)*x.qty,0);
       // Record sale first, then update shared stock. If a stock update fails, refresh and report it.
       const {error:saleError}=await db.from("sales").insert({date:now.toISOString(),day,items,total,cash,change_amount:cash-total,gross_profit:grossProfit,created_by:user.id});
@@ -450,12 +481,52 @@
   }
   function renderProducts() {
     const q=$("productListSearch").value.trim().toLowerCase();
-    const list=products.filter(p=>p.name.toLowerCase().includes(q)||String(p.barcode).toLowerCase().includes(q));
-    $("productsTable").innerHTML=list.length?`<table><thead><tr><th>Product</th><th>Category</th><th>Barcode</th><th>Cost</th><th>Selling price</th><th>Stock</th><th>Quick button</th><th>Actions</th></tr></thead><tbody>${list.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||"Uncategorized")}</td><td>${escapeHtml(p.noBarcode?"—":p.barcode)}</td><td>${money(p.cost)}</td><td>${money(p.price)}</td><td>${p.stock}</td><td>${p.noBarcode&&p.quickShow!==false?'Shown':'Hidden'}</td><td><button class="secondary small" data-edit="${escapeHtml(p.id)}">Edit</button> <button class="danger small" data-delete="${escapeHtml(p.id)}">Delete</button></td></tr>`).join("")}</tbody></table>`:'<p class="muted">No products yet. Add your first product above.</p>';
+    const cats=[...new Set(products.map(p=>String(p.category||"Uncategorized").trim()||"Uncategorized"))].sort((a,b)=>a.localeCompare(b));
+    $("productCategoryFilters").innerHTML=[`<button class="category-chip ${productCategoryFilter==="all"?"active":""}" data-product-category="all">All categories</button>`,...cats.map(c=>`<button class="category-chip ${productCategoryFilter===c?"active":""}" data-product-category="${escapeHtml(c)}">${escapeHtml(c)}</button>`)].join("");
+    $("productCategoryFilters").querySelectorAll("[data-product-category]").forEach(b=>b.addEventListener("click",()=>{productCategoryFilter=b.dataset.productCategory;renderProducts();}));
+    const list=products.filter(p=>{
+      const category=String(p.category||"Uncategorized").trim()||"Uncategorized";
+      const matchesCategory=productCategoryFilter==="all"||category===productCategoryFilter;
+      const matchesSearch=String(p.name||"").toLowerCase().includes(q)||String(p.barcode||"").toLowerCase().includes(q)||category.toLowerCase().includes(q);
+      return matchesCategory&&matchesSearch;
+    }).sort((a,b)=>String(a.category||"Uncategorized").localeCompare(String(b.category||"Uncategorized"))||String(a.name).localeCompare(String(b.name)));
+    const grouped={};list.forEach(p=>{const c=String(p.category||"Uncategorized").trim()||"Uncategorized";(grouped[c] ||= []).push(p);});
+    const body=Object.entries(grouped).map(([cat,items])=>`<tr class="category-row"><td colspan="8">${escapeHtml(cat)} — ${items.length} product(s)</td></tr>`+items.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||"Uncategorized")}</td><td>${escapeHtml(p.noBarcode?"—":p.barcode)}</td><td>${money(p.cost)}</td><td>${money(p.price)}</td><td>${num(p.stock)}</td><td>${p.noBarcode&&p.quickShow!==false?'Shown':'Hidden'}</td><td><button class="secondary small" data-edit="${escapeHtml(p.id)}">Edit</button> <button class="danger small" data-delete="${escapeHtml(p.id)}">Delete</button></td></tr>`).join("")).join("");
+    $("productsTable").innerHTML=list.length?`<table><thead><tr><th>Product</th><th data-sort-category="1" title="Tap to show all categories">Category ↕</th><th>Barcode</th><th>Cost</th><th>Selling price</th><th>Stock</th><th>Quick button</th><th>Actions</th></tr></thead><tbody>${body}</tbody></table>`:'<p class="muted">No matching products.</p>';
+    const totalQty=list.reduce((s,p)=>s+num(p.stock),0),costValue=list.reduce((s,p)=>s+num(p.stock)*num(p.cost),0),sellingValue=list.reduce((s,p)=>s+num(p.stock)*num(p.price),0);
+    $("productTotals").innerHTML=`<div class="metric"><span>Products shown</span><strong>${list.length}</strong></div><div class="metric"><span>Total quantity</span><strong>${totalQty.toLocaleString("en-PH")}</strong></div><div class="metric"><span>Inventory cost value</span><strong>${money(costValue)}</strong></div><div class="metric"><span>Potential selling value</span><strong>${money(sellingValue)}</strong></div><div class="metric"><span>Potential gross profit</span><strong>${money(sellingValue-costValue)}</strong></div>`;
     $("productsTable").querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>editProduct(b.dataset.edit)));
     $("productsTable").querySelectorAll("[data-delete]").forEach(b=>b.addEventListener("click",()=>deleteProduct(b.dataset.delete)));
+    const categoryHead=$("productsTable").querySelector("[data-sort-category]");if(categoryHead)categoryHead.addEventListener("click",()=>{productCategoryFilter="all";renderProducts();});
     fillProductSelects();
   }
+
+  function renderStockMonitor(){
+    const q=$("stockMonitorSearch").value.trim().toLowerCase();
+    const matches=products.filter(p=>String(p.name||"").toLowerCase().includes(q)||String(p.barcode||"").toLowerCase().includes(q)||String(p.category||"Uncategorized").toLowerCase().includes(q));
+    const out=matches.filter(p=>num(p.stock)===0),critical=matches.filter(p=>num(p.stock)>0&&num(p.stock)<=2),available=matches.filter(p=>num(p.stock)>=3);
+    const active=stockMonitorFilter==="out"?out:stockMonitorFilter==="critical"?critical:stockMonitorFilter==="available"?available:matches;
+    document.querySelectorAll("[data-stock-filter]").forEach(b=>{b.classList.toggle("active",b.dataset.stockFilter===stockMonitorFilter);b.classList.toggle("secondary",b.dataset.stockFilter!==stockMonitorFilter);});
+    $("stockMonitorTable").innerHTML=active.length?`<table><thead><tr><th>Product</th><th>Category</th><th>Barcode</th><th class="right">Stock</th><th>Status</th><th class="right">Cost / unit</th><th class="right">Restock to 3</th><th class="right">Estimated cost</th></tr></thead><tbody>${active.sort((a,b)=>num(a.stock)-num(b.stock)||String(a.name).localeCompare(String(b.name))).map(p=>{const qty=Math.max(0,3-num(p.stock));const status=num(p.stock)===0?'OUT OF STOCK':num(p.stock)<=2?'CRITICAL':'AVAILABLE';return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||"Uncategorized")}</td><td>${escapeHtml(p.noBarcode?"—":p.barcode)}</td><td class="right">${num(p.stock)}</td><td><span class="pill ${num(p.stock)===0?'bad':num(p.stock)<=2?'warn':''}">${status}</span></td><td class="right">${money(p.cost)}</td><td class="right">${qty}</td><td class="right">${money(qty*num(p.cost))}</td></tr>`;}).join("")}</tbody></table>`:'<p class="muted">No products in this section match your search.</p>';
+    const allQty=matches.reduce((s,p)=>s+num(p.stock),0),outCost=out.reduce((s,p)=>s+3*num(p.cost),0),criticalCost=critical.reduce((s,p)=>s+Math.max(0,3-num(p.stock))*num(p.cost),0),totalRestock=outCost+criticalCost;
+    $("stockMonitorTotals").innerHTML=`<div class="metric"><span>Out of stock items</span><strong>${out.length}</strong></div><div class="metric"><span>Critical items (1–2)</span><strong>${critical.length}</strong></div><div class="metric"><span>Available items (3+)</span><strong>${available.length}</strong></div><div class="metric"><span>Total stock quantity</span><strong>${allQty.toLocaleString("en-PH")}</strong></div><div class="metric"><span>Estimated restock cost to 3 units</span><strong>${money(totalRestock)}</strong></div>`;
+  }
+  function printStockMonitor(){
+    const q=$("stockMonitorSearch").value.trim().toLowerCase();
+    const matches=products.filter(p=>String(p.name||"").toLowerCase().includes(q)||String(p.barcode||"").toLowerCase().includes(q)||String(p.category||"Uncategorized").toLowerCase().includes(q));
+    const out=matches.filter(p=>num(p.stock)===0),critical=matches.filter(p=>num(p.stock)>0&&num(p.stock)<=2),available=matches.filter(p=>num(p.stock)>=3);
+    const active=(stockMonitorFilter==="out"?out:stockMonitorFilter==="critical"?critical:stockMonitorFilter==="available"?available:matches).slice().sort((a,b)=>num(a.stock)-num(b.stock)||String(a.name).localeCompare(String(b.name)));
+    const label=stockMonitorFilter==="out"?"OUT OF STOCK":stockMonitorFilter==="critical"?"CRITICAL STOCK (1–2 UNITS)":stockMonitorFilter==="available"?"AVAILABLE STOCK (3+ UNITS)":"ALL STOCK ITEMS";
+    const totalQty=active.reduce((sum,p)=>sum+num(p.stock),0);
+    const restockQty=active.reduce((sum,p)=>sum+Math.max(0,3-num(p.stock)),0);
+    const restockCost=active.reduce((sum,p)=>sum+Math.max(0,3-num(p.stock))*num(p.cost),0);
+    const rows=active.map(p=>{const qty=Math.max(0,3-num(p.stock));return `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.category||"Uncategorized")}</td><td>${escapeHtml(p.noBarcode?"—":p.barcode)}</td><td class="right">${num(p.stock)}</td><td class="right">${num(p.cost).toLocaleString("en-PH",{style:"currency",currency:"PHP"})}</td><td class="right">${qty}</td><td class="right">${money(qty*num(p.cost))}</td><td></td></tr>`;}).join("");
+    $("generatedStockReport").innerHTML=`<div style="font-family:Arial,Helvetica,sans-serif;color:#17211b"><h1>Gerald POS — Stock Replenishment List</h1><h2>${label}</h2><p>Generated: ${escapeHtml(new Date().toLocaleString("en-PH"))}</p><p>Search filter: ${escapeHtml(q||"None")} · Items listed: ${active.length}</p><div class="summary-grid"><div class="metric"><span>Items in list</span><strong>${active.length}</strong></div><div class="metric"><span>Current stock quantity</span><strong>${totalQty}</strong></div><div class="metric"><span>Restock units to reach 3 each</span><strong>${restockQty}</strong></div><div class="metric"><span>Estimated restock cost</span><strong>${money(restockCost)}</strong></div></div><table style="margin-top:14px"><thead><tr><th>Product</th><th>Category</th><th>Barcode</th><th class="right">Current Stock</th><th class="right">Cost / Unit</th><th class="right">Qty to Buy (to 3)</th><th class="right">Est. Cost</th><th>Purchased ✓</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="center">No items in this stock list.</td></tr>'}</tbody><tfoot><tr><th colspan="3">TOTAL</th><th class="right">${totalQty}</th><th></th><th class="right">${restockQty}</th><th class="right">${money(restockCost)}</th><th></th></tr></tfoot></table><p style="margin-top:18px;font-size:11px;color:#555">Restock quantity is calculated to bring each listed product to 3 units. Estimated cost uses the saved cost per unit; actual market prices may differ.</p></div>`;
+    document.body.classList.add("printingStock");
+    window.print();
+    setTimeout(()=>document.body.classList.remove("printingStock"),1000);
+  }
+
   async function editProduct(id) {
     const p=products.find(x=>x.id===id); if(!p)return;
     const name=prompt("Product name:",p.name); if(name===null)return;
@@ -592,12 +663,20 @@
     if(!key)return message(type==="day"?"Choose a report date first.":"Choose a report month first.","error");
     const list=sales.filter(s=>type==="day"?saleDay(s)===key:saleDay(s).slice(0,7)===key).sort((a,b)=>new Date(a.date)-new Date(b.date));
     const total=list.reduce((sum,s)=>sum+num(s.total),0),profit=list.reduce((sum,s)=>sum+num(s.grossProfit),0);
-    const units=list.reduce((sum,s)=>sum+(s.items||[]).reduce((a,it)=>a+num(it.qty),0),0);
+    const activeSales=list.filter(s=>Array.isArray(s.items)&&s.items.length);
+    const units=activeSales.reduce((sum,s)=>sum+s.items.reduce((a,it)=>a+num(it.qty),0),0);
     const label=type==="day"?new Date(key+"T12:00:00").toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"}):new Date(key+"-01T12:00:00").toLocaleDateString("en-PH",{year:"numeric",month:"long"});
-    const rows=list.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}</td><td>${(s.items||[]).map(it=>`${escapeHtml(it.name)} × ${num(it.qty)}`).join("<br>")||"VOIDED / no active items"}</td><td class="right">${money(s.total)}</td><td class="right">${money(s.cash)}</td><td class="right">${money(s.change)}</td><td class="right">${money(s.grossProfit)}</td></tr>`).join("");
-    $("generatedReport").innerHTML=`<div class="print-heading"><h1>Gerald POS</h1><p>Sales Report — ${escapeHtml(label)}</p><p>Generated: ${escapeHtml(new Date().toLocaleString("en-PH"))}</p></div><h2>${type==="day"?"Daily":"Monthly"} Sales Report — ${escapeHtml(label)}</h2><div class="grid"><div class="metric"><span>Transactions</span><strong>${list.length}</strong></div><div class="metric"><span>Units sold</span><strong>${units}</strong></div><div class="metric"><span>Total sales</span><strong>${money(total)}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div></div><div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Date / time</th><th>Items</th><th class="right">Sales</th><th class="right">Cash</th><th class="right">Change</th><th class="right">Gross profit</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="center">No sales for this period.</td></tr>'}</tbody><tfoot><tr><th colspan="2">TOTAL</th><th class="right">${money(total)}</th><th></th><th></th><th class="right">${money(profit)}</th></tr></tfoot></table></div><p class="muted">Estimated gross profit uses the product cost recorded at sale time and excludes other expenses, household use, and missing stock.</p>`;
+    const byCategory={};
+    for(const sale of activeSales){for(const it of sale.items){const product=products.find(p=>p.id===it.product_id||p.id===it.productId);const cat=String(it.category||product?.category||"Uncategorized").trim()||"Uncategorized";const qty=num(it.qty);const lineTotal=it.subtotal!==undefined?num(it.subtotal):num(it.price)*qty;const lineProfit=(num(it.price)-num(it.cost))*qty;(byCategory[cat] ||= {products:{},qty:0,sales:0,profit:0});byCategory[cat].qty+=qty;byCategory[cat].sales+=lineTotal;byCategory[cat].profit+=lineProfit;const name=String(it.name||product?.name||"Unknown product");const pr=(byCategory[cat].products[name] ||= {qty:0,sales:0,profit:0});pr.qty+=qty;pr.sales+=lineTotal;pr.profit+=lineProfit;}}
+    const categories=Object.entries(byCategory).sort((a,b)=>b[1].sales-a[1].sales);
+    const categoryHtml=categories.map(([cat,data])=>{const productRows=Object.entries(data.products).sort((a,b)=>b[1].qty-a[1].qty||b[1].sales-a[1].sales).map(([name,x])=>`<tr><td>${escapeHtml(name)}</td><td class="right">${x.qty}</td><td class="right">${money(x.sales)}</td><td class="right">${money(x.profit)}</td></tr>`).join("");return `<h3 style="margin:18px 0 7px">${escapeHtml(cat)}</h3><div class="tablewrap"><table><thead><tr><th>Product</th><th class="right">Qty sold</th><th class="right">Total sales</th><th class="right">Gross profit</th></tr></thead><tbody>${productRows}</tbody><tfoot><tr><th>TOTAL ${escapeHtml(cat)}</th><th class="right">${data.qty}</th><th class="right">${money(data.sales)}</th><th class="right">${money(data.profit)}</th></tr></tfoot></table></div>`;}).join("");
+    const categorySalesTotal=categories.reduce((sum,[,d])=>sum+d.sales,0);
+    const reconciliationNote=Math.abs(categorySalesTotal-total)<0.011?'Category sales tally matches recorded grand total.':'Note: line-item totals differ from recorded sale totals. Please review sales/void history.';
+    const categorySummaryRows=categories.map(([cat,d])=>`<tr><td>${escapeHtml(cat)}</td><td class="right">${d.qty}</td><td class="right">${money(d.sales)}</td><td class="right">${money(d.profit)}</td></tr>`).join("");
+    const recentRows=list.map(s=>`<tr><td>${escapeHtml(new Date(s.date).toLocaleString("en-PH"))}</td><td>${(s.items||[]).map(it=>`${escapeHtml(it.name)} × ${num(it.qty)}`).join("<br>")||"VOIDED / no active items"}</td><td class="right">${money(s.total)}</td></tr>`).join("");
+    $("generatedReport").innerHTML=`<div class="print-heading"><h1>Gerald POS</h1><p>Sales Report — ${escapeHtml(label)}</p><p>Generated: ${escapeHtml(new Date().toLocaleString("en-PH"))}</p></div><h2>${type==="day"?"Daily":"Monthly"} Sales Report — ${escapeHtml(label)}</h2><div class="grid"><div class="metric"><span>Transactions</span><strong>${list.length}</strong></div><div class="metric"><span>Units sold</span><strong>${units}</strong></div><div class="metric"><span>Grand total sales</span><strong>${money(total)}</strong></div><div class="metric"><span>Estimated gross profit</span><strong>${money(profit)}</strong></div></div><h3 style="margin-top:18px">Category Summary</h3><div class="tablewrap"><table><thead><tr><th>Category</th><th class="right">Qty sold</th><th class="right">Total sales</th><th class="right">Gross profit</th></tr></thead><tbody>${categorySummaryRows||'<tr><td colspan="4" class="center">No active item sales for this period.</td></tr>'}</tbody><tfoot><tr><th>GRAND TOTAL — ALL CATEGORIES</th><th class="right">${units}</th><th class="right">${money(categorySalesTotal)}</th><th class="right">${money(categories.reduce((sum,[,d])=>sum+d.profit,0))}</th></tr></tfoot></table></div><p class="${Math.abs(categorySalesTotal-total)<0.011?'success':'error'} notice">${escapeHtml(reconciliationNote)} Recorded sales total: ${money(total)}.</p>${categoryHtml}<h3 style="margin-top:20px">Transaction Detail</h3><div class="tablewrap"><table><thead><tr><th>Date / time</th><th>Items</th><th class="right">Recorded sale total</th></tr></thead><tbody>${recentRows||'<tr><td colspan="3" class="center">No sales for this period.</td></tr>'}</tbody><tfoot><tr><th colspan="2">TOTAL RECORDED SALES</th><th class="right">${money(total)}</th></tr></tfoot></table></div><p class="muted">Gross profit is estimated from the cost stored on each sale item and excludes other expenses. Older sales are grouped by the product's current category if no category was stored when the sale occurred.</p>`;
     $("printReportButton").disabled=false;
-    message("Sales report generated. You can print it or save as PDF.","success");
+    message("Category sales report generated. Check the reconciliation note before saving the PDF.","success");
   }
   function printGeneratedReport(){
     if(!$("generatedReport").innerText.trim()||$("printReportButton").disabled)return;
@@ -620,11 +699,12 @@
     $("salesTable").querySelectorAll("[data-void-item]").forEach(b=>b.addEventListener("click",()=>voidSaleItem(b.dataset.voidItem,Number(b.dataset.itemIndex))));
     $("salesTable").querySelectorAll("[data-void-sale]").forEach(b=>b.addEventListener("click",()=>voidWholeSale(b.dataset.voidSale)));
   }
-  function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderTodaySales();renderReports();}
+  function renderAll(){renderQuickItems();renderCart();renderProducts();renderCountDrafts();renderTodaySales();renderReports();renderStockMonitor();}
   function switchPage(id){
     document.querySelectorAll(".page").forEach(p=>p.classList.toggle("hidden",p.id!==id));
     document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===id));
     if(id==="reportsPage")renderReports();
+    if(id==="stockMonitorPage")renderStockMonitor();
   }
   async function exportBackup(){
     const data={app:"Gerald POS",version:3,exportedAt:new Date().toISOString(),products,sales};
@@ -744,6 +824,9 @@
   $("clearCartButton").addEventListener("click",()=>{cart=[];$("cashReceived").value="";$("saleProductSearch").value="";$("saleProductMatches").innerHTML="";renderCart();});
   $("addProductButton").addEventListener("click",addNewProduct);
   $("productListSearch").addEventListener("input",renderProducts);
+  $("stockMonitorSearch").addEventListener("input",renderStockMonitor);
+  $("printStockButton").addEventListener("click",printStockMonitor);
+  document.querySelectorAll("[data-stock-filter]").forEach(b=>b.addEventListener("click",()=>{stockMonitorFilter=b.dataset.stockFilter;renderStockMonitor();}));
   $("stockInButton").addEventListener("click",stockIn);
   $("saveCountButton").addEventListener("click",saveCountDraft);
   $("applyCountButton").addEventListener("click",applyCounts);
